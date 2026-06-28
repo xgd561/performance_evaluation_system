@@ -1,0 +1,25 @@
+import request from './request'
+
+export function listCycles() {
+  return request.get('/assessment-cycles')
+}
+
+export function createCycle(data) {
+  return request.post('/assessment-cycles', data)
+}
+
+export function updateCycle(id, data) {
+  return request.put(`/assessment-cycles/${id}`, data)
+}
+
+export function deleteCycle(id) {
+  return request.delete(`/assessment-cycles/${id}`)
+}
+
+export function launchCycle(data) {
+  return request.post('/assessment-cycles/launch', data)
+}
+
+export function getCycleProgress(id) {
+  return request.get(`/assessment-cycles/${id}/progress`)
+}
