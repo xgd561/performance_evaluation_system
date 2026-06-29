@@ -77,6 +77,7 @@ class EmployeeCreate(BaseModel):
     department_id: Optional[int] = None
     position_id: Optional[int] = None
     manager_id: Optional[int] = None
+    manager_employee_no: Optional[str] = None
     is_department_head: Optional[bool] = False
     is_active: Optional[bool] = True
 
@@ -86,6 +87,7 @@ class EmployeeUpdate(BaseModel):
     department_id: Optional[int] = None
     position_id: Optional[int] = None
     manager_id: Optional[int] = None
+    manager_employee_no: Optional[str] = None
     is_department_head: Optional[bool] = None
     is_active: Optional[bool] = None
 
@@ -94,8 +96,12 @@ class EmployeeOut(BaseModel):
     employee_no: str
     name: str
     department_id: Optional[int]
+    department_name: Optional[str] = None
     position_id: Optional[int]
+    position_name: Optional[str] = None
     manager_id: Optional[int]
+    manager_name: Optional[str] = None
+    manager_employee_no: Optional[str] = None
     is_department_head: bool
     is_active: bool
     created_at: Optional[datetime]
@@ -128,6 +134,23 @@ class KpiTemplateCreate(BaseModel):
         if total != 100:
             raise ValueError(f"KPI模板权重总和必须等于100%，当前为{total}%")
         return v
+
+class KpiTemplateSingleCreate(BaseModel):
+    position_id: int
+    name: str
+    weight: Decimal
+    target_value: Optional[str] = None
+    scoring_method: Optional[str] = "percentage"
+    description: Optional[str] = None
+
+class KpiTemplateSingleUpdate(BaseModel):
+    position_id: Optional[int] = None
+    name: Optional[str] = None
+    weight: Optional[Decimal] = None
+    target_value: Optional[str] = None
+    scoring_method: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
 
 class KpiTemplateUpdate(BaseModel):
     items: List[KpiItemCreate]

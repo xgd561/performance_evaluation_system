@@ -6,6 +6,8 @@ from app.auth import get_current_user, require_role
 from app.models import KpiTemplate, KpiAdjustment, AssessmentRecord
 from app.schemas import (
     KpiTemplateCreate,
+    KpiTemplateSingleCreate,
+    KpiTemplateSingleUpdate,
     KpiTemplateUpdate,
     KpiTemplateOut,
     KpiAdjustmentCreate,
@@ -22,6 +24,43 @@ def list_kpi_templates(
 ):
     templates = db.query(KpiTemplate).filter(KpiTemplate.is_active == True).all()
     return templates
+
+
+@router.post("/single", status_code=status.HTTP_201_CREATED)
+def create_kpi_template_single(
+    req: KpiTemplateSingleCreate,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin")),
+):
+    tmpl = KpiTemplate(
+        position_id=req.position_id,
+        name=req.name,
+        weight=req.weight,
+        target_value=req.target_value,
+        scoring_method=req.scoring_method,
+        description=req.description,
+    )
+    db.add(tmpl)
+    db.commit()
+    db.refresh(tmpl)
+    return tmpl
+
+
+@router.put("/single/{template_id}")
+def update_kpi_template_single(
+    template_id: int,
+    req: KpiTemplateSingleUpdate,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin")),
+):
+    tmpl = db.query(KpiTemplate).filter(KpiTemplate.id == template_id).first()
+    if not tmpl:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="KPI模板不存在")
+    for field, value in req.model_dump(exclude_unset=True).items():
+        setattr(tmpl, field, value)
+    db.commit()
+    db.refresh(tmpl)
+    return tmpl
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -92,6 +131,20 @@ def update_kpi_template(
         "position_id": position_id,
         "items": created_items,
     }
+
+
+@router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_kpi_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin")),
+):
+    tmpl = db.query(KpiTemplate).filter(KpiTemplate.id == template_id).first()
+    if not tmpl:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="KPI模板不存在")
+    db.delete(tmpl)
+    db.commit()
+    return
 
 
 @router.post("/{record_id}/adjust")

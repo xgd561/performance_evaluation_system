@@ -5,9 +5,13 @@ export function listKpiTemplates() {
 }
 
 export function createKpiTemplate(data) {
-  return request.post('/kpi-templates', data)
+  return request.post('/kpi-templates/single', data)
 }
 
 export function updateKpiTemplate(id, data) {
-  return request.put(`/kpi-templates/${id}`, data)
+  return request.put(`/kpi-templates/single/${id}`, data)
+}
+
+export function deleteKpiTemplate(id) {
+  return request.delete(`/kpi-templates/${id}`)
 }
