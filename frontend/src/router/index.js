@@ -19,6 +19,7 @@ const routes = [
       { path: 'cycles', name: 'Cycles', component: () => import('@/views/cycles/CycleList.vue') },
       { path: 'kpi-templates', name: 'KpiTemplates', component: () => import('@/views/kpi-templates/KpiTemplateList.vue') },
       { path: 'config', name: 'Config', component: () => import('@/views/config/ConfigView.vue') },
+      { path: 'appeals', name: 'Appeals', component: () => import('@/views/appeal/AppealList.vue') },
     ],
   },
 ]

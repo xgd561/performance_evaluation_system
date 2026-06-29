@@ -33,6 +33,10 @@
           <el-icon><Setting /></el-icon>
           <span>系统配置</span>
         </el-menu-item>
+        <el-menu-item index="/appeals">
+          <el-icon><Bell /></el-icon>
+          <span>申诉管理</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

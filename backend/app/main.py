@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from app.database import init_db
-from app.routers import auth, employees, departments, cycles, kpi_templates, config, dashboard
+from app.routers import auth, employees, departments, cycles, kpi_templates, config, dashboard, appeals
 import app.models
 
 app = FastAPI(
@@ -48,7 +48,7 @@ api_v1.include_router(departments.router_positions, prefix="/positions", tags=["
 api_v1.include_router(cycles.router, prefix="/assessment-cycles", tags=["考核周期"])
 api_v1.include_router(kpi_templates.router, prefix="/kpi-templates", tags=["KPI模板"])
 api_v1.include_router(config.router, prefix="/config", tags=["系统配置"])
-api_v1.include_router(dashboard.router, prefix="/dashboard", tags=["仪表盘"])
+api_v1.include_router(appeals.router, prefix="/appeals", tags=["申诉管理"])
 
 app.include_router(api_v1)
 
@@ -62,6 +62,7 @@ direct_api.include_router(cycles.router, prefix="/assessment-cycles", tags=["考
 direct_api.include_router(kpi_templates.router, prefix="/kpi-templates", tags=["KPI模板"])
 direct_api.include_router(config.router, prefix="/config", tags=["系统配置"])
 direct_api.include_router(dashboard.router, prefix="/dashboard", tags=["仪表盘"])
+direct_api.include_router(appeals.router, prefix="/appeals", tags=["申诉管理"])
 
 app.include_router(direct_api)
 
