@@ -166,6 +166,7 @@ class KpiTemplateUpdate(BaseModel):
 class KpiTemplateOut(BaseModel):
     id: int
     position_id: int
+    position_name: Optional[str] = None
     name: str
     weight: Decimal
     target_value: Optional[str]

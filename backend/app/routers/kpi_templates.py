@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.auth import get_current_user, require_role
@@ -22,8 +22,22 @@ def list_kpi_templates(
     db: Session = Depends(get_db),
     user = Depends(get_current_user),
 ):
-    templates = db.query(KpiTemplate).filter(KpiTemplate.is_active == True).all()
-    return templates
+    templates = db.query(KpiTemplate).options(joinedload(KpiTemplate.position)).filter(KpiTemplate.is_active == True).all()
+    return [
+        {
+            "id": t.id,
+            "position_id": t.position_id,
+            "position_name": t.position.name if t.position else None,
+            "name": t.name,
+            "weight": t.weight,
+            "target_value": t.target_value,
+            "scoring_method": t.scoring_method,
+            "description": t.description,
+            "is_active": t.is_active,
+            "created_at": t.created_at,
+        }
+        for t in templates
+    ]
 
 
 @router.post("/single", status_code=status.HTTP_201_CREATED)
