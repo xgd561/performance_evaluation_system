@@ -1,0 +1,24 @@
+npm warn Unknown user config "ENTRYCLI_CDNURL". This will stop working in the next major version of npm.
+npm warn Unknown user config "sentrycli_cdnurl". This will stop working in the next major version of npm.
+
+> performance-evaluation-system-frontend@1.0.0 dev
+> vite
+
+Port 3000 is in use, trying another one...
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m953[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3001[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: u[2m01:40:18[22m [36m[1m[vite][22m[39m[2m03:49:41[22m [36m[1m[vite][22m[39m [32mvite.config.js changed, restarting server...[39m
+[2m03:49:41[22m [36m[1m[vite][22m[39m [32mvite.config.js changed, restarting server...[39m
+[2m03:49:41[22m [36m[1m[vite][22m[39m server restarted.
+[2m07:17:30[22m [36m[1m[vite][22m[39m [32mvite.config.js changed, restarting server...[39m
+[2m07:17:31[22m [36m[1m[vite][22m[39m server restarted.
+[2m08:04:18[22m [36m[1m[vite][22m[39m [32mvite.config.js changed, restarting server...[39m
+[2m08:04:18[22m [36m[1m[vite][22m[39m server restarted.
+t.vue[22m
+[2m03:16:53[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/cycles/CycleList.vue[22m
+[2m03:18:22[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/cycles/CycleList.vue[22m
+[2m03:49:41[22m [36m[1m[vite][22m[39m [32mvite.config.js changed, restarting server...[39m
+[2m03:49:41[22m [36m[1m[vite][22m[39m server restarted.
+[2m04:06:18[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/kpi-templates/KpiTemplateList.vue[22m
