@@ -168,7 +168,7 @@
 import { ref, reactive, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import PageContainer from '@/components/PageContainer.vue'
+import { getToReviewList, submitManagerScore } from '@/api/scores'
 import { useAuthStore } from '@/stores/auth'
 import { SCORE_ANCHORS, DIMENSION_TEXT } from '@/utils/constants'
 

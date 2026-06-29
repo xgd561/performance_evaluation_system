@@ -304,6 +304,39 @@ def get_employee(
     }
 
 
+@router.get("/{employee_id}/subordinates")
+def get_subordinates(
+    employee_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("manager", "admin", "hr")),
+):
+    """获取某员工的直属下属列表"""
+    emp = db.query(Employee).filter(Employee.id == employee_id, Employee.is_active == True).first()
+    if not emp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工不存在")
+
+    subordinates = db.query(Employee).filter(
+        Employee.manager_id == employee_id,
+        Employee.is_active == True
+    ).all()
+
+    result = []
+    for sub in subordinates:
+        result.append({
+            "id": sub.id,
+            "employee_no": sub.employee_no,
+            "name": sub.name,
+            "department_id": sub.department_id,
+            "department_name": sub.department.name if sub.department else None,
+            "position_id": sub.position_id,
+            "position_name": sub.position.name if sub.position else None,
+            "is_active": sub.is_active,
+            "created_at": sub.created_at.isoformat() if sub.created_at else None,
+        })
+
+    return result
+
+
 def _resolve_manager_id(db: Session, manager_employee_no: Optional[str], fallback_manager_id: Optional[int] = None) -> Optional[int]:
     """Look up manager_id by employee_no. If manager_employee_no is provided and not empty, return the resolved id. Otherwise return the fallback."""
     if manager_employee_no is not None:

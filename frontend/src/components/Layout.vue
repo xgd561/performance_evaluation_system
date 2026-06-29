@@ -13,29 +13,61 @@
           <el-icon><HomeFilled /></el-icon>
           <span>仪表盘</span>
         </el-menu-item>
-        <el-menu-item index="/employees">
+        <el-menu-item v-if="canSee('employees')" index="/employees">
           <el-icon><UserFilled /></el-icon>
           <span>员工管理</span>
         </el-menu-item>
-        <el-menu-item index="/departments">
+        <el-menu-item v-if="canSee('departments')" index="/departments">
           <el-icon><OfficeBuilding /></el-icon>
           <span>部门岗位</span>
         </el-menu-item>
-        <el-menu-item index="/cycles">
+        <el-menu-item v-if="canSee('cycles')" index="/cycles">
           <el-icon><Calendar /></el-icon>
           <span>考核周期</span>
         </el-menu-item>
-        <el-menu-item index="/kpi-templates">
+        <el-menu-item v-if="canSee('kpi-templates')" index="/kpi-templates">
           <el-icon><Document /></el-icon>
           <span>KPI模板</span>
         </el-menu-item>
-        <el-menu-item index="/config">
+        <el-menu-item v-if="canSee('config')" index="/config">
           <el-icon><Setting /></el-icon>
           <span>系统配置</span>
         </el-menu-item>
-        <el-menu-item index="/appeals">
+        <el-menu-item v-if="canSee('appeals')" index="/appeals">
           <el-icon><Bell /></el-icon>
           <span>申诉管理</span>
+        </el-menu-item>
+        <el-menu-item v-if="canSee('summary')" index="/summary">
+          <el-icon><TrendCharts /></el-icon>
+          <span>绩效汇总</span>
+        </el-menu-item>
+        <el-menu-item v-if="canSee('reports')" index="/reports">
+          <el-icon><Download /></el-icon>
+          <span>报表导出</span>
+        </el-menu-item>
+        <el-menu-item v-if="canSee('score-sheet')" index="/score-sheet">
+          <el-icon><Edit /></el-icon>
+          <span>上级评分</span>
+        </el-menu-item>
+        <el-menu-item v-if="canSee('approval-workbench')" index="/approval-workbench">
+          <el-icon><Checked /></el-icon>
+          <span>审批工作台</span>
+        </el-menu-item>
+        <el-menu-item v-if="canSee('interviews')" index="/interviews">
+          <el-icon><ChatDotRound /></el-icon>
+          <span>绩效面谈</span>
+        </el-menu-item>
+        <el-menu-item v-if="canSee('peer-review')" index="/peer-review">
+          <el-icon><Share /></el-icon>
+          <span>协作评分</span>
+        </el-menu-item>
+        <el-menu-item v-if="canSee('my-performance')" index="/my-performance">
+          <el-icon><TrendCharts /></el-icon>
+          <span>我的绩效</span>
+        </el-menu-item>
+        <el-menu-item v-if="canSee('appeal')" index="/appeal">
+          <el-icon><Bell /></el-icon>
+          <span>申诉</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -65,10 +97,26 @@
 <script setup>
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { computed } from 'vue'
 
 const router = useRouter()
 const $route = useRoute()
 const authStore = useAuthStore()
+
+const role = computed(() => authStore.user?.role || '')
+
+const menuPermissions = {
+  'admin': ['employees', 'departments', 'cycles', 'kpi-templates', 'config', 'appeals', 'summary', 'reports', 'score-sheet', 'approval-workbench', 'interviews', 'peer-review'],
+  'hr': ['employees', 'cycles', 'appeals', 'summary', 'reports'],
+  'manager': ['score-sheet', 'approval-workbench', 'interviews'],
+  'employee': ['my-performance', 'appeal'],
+  'peer': ['peer-review']
+}
+
+function canSee(menu) {
+  const allowed = menuPermissions[role.value] || []
+  return allowed.includes(menu)
+}
 
 function handleCommand(cmd) {
   if (cmd === 'logout') {

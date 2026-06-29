@@ -39,7 +39,31 @@ def list_appeals(
         })
     return result
 
-@router.get("/pending")
+@router.get("/my-appeals")
+def list_my_appeals(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("employee")),
+):
+    """获取我的申诉历史"""
+    records = db.query(AppealRecord).filter(
+        AppealRecord.employee_id == (user.employee_id or user.id)
+    ).order_by(AppealRecord.created_at.desc()).all()
+
+    result = []
+    for r in records:
+        reviewer = db.query(Employee).filter(Employee.id == r.reviewer_id).first() if r.reviewer_id else None
+        result.append({
+            "id": r.id,
+            "record_id": r.record_id,
+            "reason": r.reason,
+            "detail": r.detail,
+            "status": r.status,
+            "reviewer_name": reviewer.name if reviewer else None,
+            "review_result": r.review_result,
+            "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return result
 def list_pending_appeals(
     db: Session = Depends(get_db),
     user = Depends(require_role("admin", "hr")),

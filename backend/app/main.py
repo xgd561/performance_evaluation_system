@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from app.database import init_db
-from app.routers import auth, employees, departments, cycles, kpi_templates, config, dashboard, appeals
+from app.routers import auth, employees, departments, cycles, kpi_templates, config, dashboard, appeals, scores, reports, approvals, interviews, peers
 import app.models
 
 app = FastAPI(
@@ -49,6 +49,11 @@ api_v1.include_router(cycles.router, prefix="/assessment-cycles", tags=["考核�
 api_v1.include_router(kpi_templates.router, prefix="/kpi-templates", tags=["KPI模板"])
 api_v1.include_router(config.router, prefix="/config", tags=["系统配置"])
 api_v1.include_router(appeals.router, prefix="/appeals", tags=["申诉管理"])
+api_v1.include_router(scores.router, prefix="/scores", tags=["评分管理"])
+api_v1.include_router(approvals.router, prefix="/approvals", tags=["审批管理"])
+api_v1.include_router(interviews.router, prefix="/interviews", tags=["绩效面谈"])
+api_v1.include_router(reports.router, prefix="/reports", tags=["报表分析"])
+api_v1.include_router(peers.router, prefix="/peer-reviewers", tags=["协作评分"])
 
 app.include_router(api_v1)
 
@@ -63,6 +68,11 @@ direct_api.include_router(kpi_templates.router, prefix="/kpi-templates", tags=["
 direct_api.include_router(config.router, prefix="/config", tags=["系统配置"])
 direct_api.include_router(dashboard.router, prefix="/dashboard", tags=["仪表盘"])
 direct_api.include_router(appeals.router, prefix="/appeals", tags=["申诉管理"])
+direct_api.include_router(scores.router, prefix="/scores", tags=["评分管理"])
+direct_api.include_router(approvals.router, prefix="/approvals", tags=["审批管理"])
+direct_api.include_router(interviews.router, prefix="/interviews", tags=["绩效面谈"])
+direct_api.include_router(reports.router, prefix="/reports", tags=["报表分析"])
+direct_api.include_router(peers.router, prefix="/peer-reviewers", tags=["协作评分"])
 
 app.include_router(direct_api)
 
