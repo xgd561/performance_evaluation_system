@@ -33,6 +33,9 @@ def list_cycles(
             "type": c.type,
             "start_date": str(c.start_date) if c.start_date else None,
             "end_date": str(c.end_date) if c.end_date else None,
+            "self_due_date": str(c.self_due_date) if c.self_due_date else None,
+            "manager_due_date": str(c.manager_due_date) if c.manager_due_date else None,
+            "peer_due_date": str(c.peer_due_date) if c.peer_due_date else None,
             "status": c.status,
             "weights": json.loads(c.dimension_weights) if c.dimension_weights else {},
             "grade_rules": json.loads(c.grade_rules) if c.grade_rules else {},
@@ -90,9 +93,13 @@ def create_cycle(
         "type": cycle.type,
         "start_date": str(cycle.start_date),
         "end_date": str(cycle.end_date),
+        "self_due_date": str(cycle.self_due_date) if cycle.self_due_date else None,
+        "manager_due_date": str(cycle.manager_due_date) if cycle.manager_due_date else None,
+        "peer_due_date": str(cycle.peer_due_date) if cycle.peer_due_date else None,
         "status": "未开始",
         "weights": req.weights,
         "grade_rules": raw_grade_rules,
+        "created_at": cycle.created_at.isoformat() if cycle.created_at else None,
     }
 
 
@@ -122,7 +129,18 @@ def update_cycle(
     return {
         "id": cycle.id,
         "name": cycle.name,
+        "type": cycle.type,
+        "start_date": str(cycle.start_date) if cycle.start_date else None,
+        "end_date": str(cycle.end_date) if cycle.end_date else None,
+        "self_due_date": str(cycle.self_due_date) if cycle.self_due_date else None,
+        "manager_due_date": str(cycle.manager_due_date) if cycle.manager_due_date else None,
+        "peer_due_date": str(cycle.peer_due_date) if cycle.peer_due_date else None,
         "status": cycle.status,
+        "weights": json.loads(cycle.dimension_weights) if cycle.dimension_weights else {},
+        "grade_rules": json.loads(cycle.grade_rules) if cycle.grade_rules else {},
+        "is_distribution_enabled": cycle.is_distribution_enabled,
+        "small_dept_exemption": cycle.small_dept_exemption,
+        "created_at": cycle.created_at.isoformat() if cycle.created_at else None,
     }
 
 

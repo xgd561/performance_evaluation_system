@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.database import get_db
 from app.auth import get_current_user, require_role
@@ -22,7 +23,25 @@ def list_departments(
     user: Employee = Depends(get_current_user),
 ):
     depts = db.query(Department).all()
-    return depts
+    # Build a map for parent lookup
+    dept_map = {d.id: d for d in depts}
+    result = []
+    for d in depts:
+        position_count = db.query(Position).filter(Position.department_id == d.id).count()
+        employee_count = db.query(Employee).filter(Employee.department_id == d.id, Employee.is_active == True).count()
+        parent_name = dept_map.get(d.parent_id).name if d.parent_id and d.parent_id in dept_map else None
+        result.append({
+            "id": d.id,
+            "name": d.name,
+            "code": d.code,
+            "parent_id": d.parent_id,
+            "parent_name": parent_name,
+            "head_id": d.head_id,
+            "position_count": position_count,
+            "employee_count": employee_count,
+            "created_at": d.created_at.isoformat() if d.created_at else None,
+        })
+    return result
 
 
 @router.post("", response_model=DepartmentOut, status_code=status.HTTP_201_CREATED)

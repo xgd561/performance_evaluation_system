@@ -14,6 +14,21 @@
         </el-table-column>
         <el-table-column prop="start_date" label="开始日期" width="120" />
         <el-table-column prop="end_date" label="结束日期" width="120" />
+        <el-table-column prop="self_due_date" label="自评截止" width="120">
+          <template #default="scope">
+            <span>{{ scope.row.self_due_date || '—' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="manager_due_date" label="上级评截止" width="120">
+          <template #default="scope">
+            <span>{{ scope.row.manager_due_date || '—' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="peer_due_date" label="协作评截止" width="120">
+          <template #default="scope">
+            <span>{{ scope.row.peer_due_date || '—' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="120">
           <template #default="scope">
             <el-tag :type="statusType(scope.row.status)">{{ statusText(scope.row.status) }}</el-tag>
@@ -43,8 +58,8 @@
             <el-option label="年度" value="annual" />
           </el-select>
         </el-form-item>
-        <el-form-item label="考核时间">
-          <el-date-picker v-model="dateRange" type="daterange" start-placeholder="开始日期" end-placeholder="结束日期" value-format="YYYY-MM-DD" />
+        <el-form-item label="考核时间" prop="dateRange">
+          <el-date-picker v-model="form.dateRange" type="daterange" start-placeholder="开始日期" end-placeholder="结束日期" value-format="YYYY-MM-DD" />
         </el-form-item>
         <el-form-item label="自评截止日期">
           <el-date-picker v-model="form.self_due_date" type="date" value-format="YYYY-MM-DD" />
@@ -89,7 +104,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listCycles, createCycle, updateCycle, deleteCycle, launchCycle, getCycleProgress } from '@/api/cycles'
 import { listEmployees } from '@/api/employees'
@@ -98,7 +113,6 @@ const loading = ref(false)
 const cycles = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
-const dateRange = ref([])
 const form = reactive({
   id: null,
   name: '',
@@ -108,11 +122,13 @@ const form = reactive({
   self_due_date: '',
   manager_due_date: '',
   peer_due_date: '',
+  dateRange: [],
 })
 const formRef = ref(null)
 const rules = {
   name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
   type: [{ required: true, message: '请选择类型', trigger: 'change' }],
+  dateRange: [{ required: true, message: '请选择考核时间', trigger: 'change', type: 'array' }],
 }
 
 const launchDialogVisible = ref(false)
@@ -151,6 +167,13 @@ async function loadData() {
   loading.value = true
   try {
     const res = await listCycles()
+    console.log('[DEBUG] listCycles response:', res)
+    if (res && res.length > 0) {
+      console.log('[DEBUG] first item fields:', Object.keys(res[0]))
+      console.log('[DEBUG] first item self_due_date:', res[0].self_due_date)
+      console.log('[DEBUG] first item manager_due_date:', res[0].manager_due_date)
+      console.log('[DEBUG] first item peer_due_date:', res[0].peer_due_date)
+    }
     cycles.value = res || []
   } catch (e) {
     console.error(e)
@@ -161,8 +184,7 @@ async function loadData() {
 
 function openDialog() {
   isEdit.value = false
-  Object.assign(form, { id: null, name: '', type: 'monthly', start_date: '', end_date: '', self_due_date: '', manager_due_date: '', peer_due_date: '' })
-  dateRange.value = []
+  Object.assign(form, { id: null, name: '', type: 'monthly', start_date: '', end_date: '', self_due_date: '', manager_due_date: '', peer_due_date: '', dateRange: [] })
   dialogVisible.value = true
 }
 
@@ -177,8 +199,9 @@ function editCycle(row) {
     self_due_date: row.self_due_date || '',
     manager_due_date: row.manager_due_date || '',
     peer_due_date: row.peer_due_date || '',
+    dateRange: [row.start_date, row.end_date],
   })
-  dateRange.value = [row.start_date, row.end_date]
+  console.log('[DEBUG] editCycle form:', JSON.parse(JSON.stringify(form)))
   dialogVisible.value = true
 }
 
@@ -188,19 +211,22 @@ async function submitForm() {
     const payload = {
       name: form.name,
       type: form.type,
-      start_date: dateRange.value?.[0] || '',
-      end_date: dateRange.value?.[1] || '',
+      start_date: form.dateRange?.[0] || '',
+      end_date: form.dateRange?.[1] || '',
       self_due_date: form.self_due_date || null,
       manager_due_date: form.manager_due_date || null,
       peer_due_date: form.peer_due_date || null,
       weights: { self: 30, manager: 50, peer: 20 },
       grade_rules: { A: 90, B: 80, C: 60, D: 0 },
     }
+    console.log('[DEBUG] submitForm payload:', payload)
     if (isEdit.value) {
-      await updateCycle(form.id, payload)
+      const updateRes = await updateCycle(form.id, payload)
+      console.log('[DEBUG] updateCycle response:', updateRes)
       ElMessage.success('更新成功')
     } else {
-      await createCycle(payload)
+      const createRes = await createCycle(payload)
+      console.log('[DEBUG] createCycle response:', createRes)
       ElMessage.success('创建成功')
     }
     dialogVisible.value = false

@@ -51,7 +51,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listKpiTemplates, createKpiTemplate, updateKpiTemplate } from '@/api/kpi-templates'
+import { listKpiTemplates, createKpiTemplate, updateKpiTemplate, deleteKpiTemplate } from '@/api/kpi-templates'
 import { listPositions } from '@/api/departments'
 
 const loading = ref(false)
@@ -127,6 +127,7 @@ async function submitForm() {
 async function deleteTemplate(row) {
   try {
     await ElMessageBox.confirm(`确认删除模板 ${row.name}？`, '提示', { type: 'warning' })
+    await deleteKpiTemplate(row.id)
     ElMessage.success('删除成功')
     loadData()
   } catch (e) {

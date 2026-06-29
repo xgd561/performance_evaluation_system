@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional, Dict, Any
 import io
 import json
@@ -222,7 +221,7 @@ def list_employees(
     sort: Optional[str] = Query(None, description="排序字段: created_at, name"),
     order: Optional[str] = Query("asc", description="排序方向: asc, desc"),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user = Depends(get_current_user),
 ):
     query = db.query(Employee).filter(Employee.is_active == True)
 
@@ -249,41 +248,78 @@ def list_employees(
 
     items = query.offset((page - 1) * size).limit(size).all()
 
+    result = []
+    for emp in items:
+        dept_name = emp.department.name if emp.department else None
+        pos_name = emp.position.name if emp.position else None
+        mgr_name = emp.manager.name if emp.manager else None
+        mgr_emp_no = emp.manager.employee_no if emp.manager else None
+        result.append({
+            "id": emp.id,
+            "employee_no": emp.employee_no,
+            "name": emp.name,
+            "department_id": emp.department_id,
+            "department_name": dept_name,
+            "position_id": emp.position_id,
+            "position_name": pos_name,
+            "manager_id": emp.manager_id,
+            "manager_name": mgr_name,
+            "manager_employee_no": mgr_emp_no,
+            "is_department_head": emp.is_department_head,
+            "is_active": emp.is_active,
+            "created_at": emp.created_at.isoformat() if emp.created_at else None,
+        })
+
     return {
         "total": total,
         "page": page,
         "size": size,
-        "items": items,
+        "items": result,
     }
 
 
-@router.get("/{employee_id}/subordinates")
-def get_subordinates(
-    employee_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    subordinates = db.query(Employee).filter(Employee.manager_id == employee_id, Employee.is_active == True).all()
-    return subordinates
-
-
-@router.get("/{employee_id}", response_model=EmployeeOut)
+@router.get("/{employee_id}")
 def get_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user = Depends(get_current_user),
 ):
     emp = db.query(Employee).filter(Employee.id == employee_id, Employee.is_active == True).first()
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工不存在")
-    return emp
+    return {
+        "id": emp.id,
+        "employee_no": emp.employee_no,
+        "name": emp.name,
+        "department_id": emp.department_id,
+        "department_name": emp.department.name if emp.department else None,
+        "position_id": emp.position_id,
+        "position_name": emp.position.name if emp.position else None,
+        "manager_id": emp.manager_id,
+        "manager_name": emp.manager.name if emp.manager else None,
+        "manager_employee_no": emp.manager.employee_no if emp.manager else None,
+        "is_department_head": emp.is_department_head,
+        "is_active": emp.is_active,
+        "created_at": emp.created_at.isoformat() if emp.created_at else None,
+    }
 
 
-@router.post("", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
+def _resolve_manager_id(db: Session, manager_employee_no: Optional[str], fallback_manager_id: Optional[int] = None) -> Optional[int]:
+    """Look up manager_id by employee_no. If manager_employee_no is provided and not empty, return the resolved id. Otherwise return the fallback."""
+    if manager_employee_no is not None:
+        manager_employee_no = manager_employee_no.strip()
+    if manager_employee_no:
+        mgr = db.query(Employee).filter(Employee.employee_no == manager_employee_no).first()
+        if mgr:
+            return mgr.id
+    return fallback_manager_id
+
+
+@router.post("", status_code=status.HTTP_201_CREATED)
 def create_employee(
     req: EmployeeCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("admin", "hr")),
+    user = Depends(require_role("admin", "hr")),
 ):
     # Check duplicate employee_no
     existing = db.query(Employee).filter(Employee.employee_no == req.employee_no).first()
@@ -308,19 +344,47 @@ def create_employee(
                 detail="岗位不存在",
             )
 
-    emp = Employee(**req.model_dump())
+    # Resolve manager_id: if manager_employee_no provided, use it; otherwise use manager_id from request
+    if req.manager_employee_no is not None and req.manager_employee_no.strip():
+        manager_id = _resolve_manager_id(db, req.manager_employee_no)
+    else:
+        manager_id = req.manager_id
+
+    emp = Employee(
+        employee_no=req.employee_no,
+        name=req.name,
+        department_id=req.department_id,
+        position_id=req.position_id,
+        manager_id=manager_id,
+        is_department_head=req.is_department_head,
+        is_active=req.is_active,
+    )
     db.add(emp)
     db.commit()
     db.refresh(emp)
-    return emp
+    return {
+        "id": emp.id,
+        "employee_no": emp.employee_no,
+        "name": emp.name,
+        "department_id": emp.department_id,
+        "department_name": emp.department.name if emp.department else None,
+        "position_id": emp.position_id,
+        "position_name": emp.position.name if emp.position else None,
+        "manager_id": emp.manager_id,
+        "manager_name": emp.manager.name if emp.manager else None,
+        "manager_employee_no": emp.manager.employee_no if emp.manager else None,
+        "is_department_head": emp.is_department_head,
+        "is_active": emp.is_active,
+        "created_at": emp.created_at.isoformat() if emp.created_at else None,
+    }
 
 
-@router.put("/{employee_id}", response_model=EmployeeOut)
+@router.put("/{employee_id}")
 def update_employee(
     employee_id: int,
     req: EmployeeUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("admin", "hr")),
+    user = Depends(require_role("admin", "hr")),
 ):
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
@@ -347,18 +411,47 @@ def update_employee(
                 detail="部门不存在",
             )
 
+    # Resolve manager_id: if manager_employee_no provided, use it; otherwise use manager_id from request
+    if req.manager_employee_no is not None and req.manager_employee_no.strip():
+        manager_id = _resolve_manager_id(db, req.manager_employee_no)
+    elif req.manager_id is not None:
+        manager_id = req.manager_id
+    else:
+        manager_id = None
+
+    if manager_id is not None:
+        emp.manager_id = manager_id
+
     for field, value in req.model_dump(exclude_unset=True).items():
+        if field == "manager_employee_no":
+            continue  # Already handled above
+        if field == "manager_id":
+            continue  # Already handled above
         setattr(emp, field, value)
     db.commit()
     db.refresh(emp)
-    return emp
+    return {
+        "id": emp.id,
+        "employee_no": emp.employee_no,
+        "name": emp.name,
+        "department_id": emp.department_id,
+        "department_name": emp.department.name if emp.department else None,
+        "position_id": emp.position_id,
+        "position_name": emp.position.name if emp.position else None,
+        "manager_id": emp.manager_id,
+        "manager_name": emp.manager.name if emp.manager else None,
+        "manager_employee_no": emp.manager.employee_no if emp.manager else None,
+        "is_department_head": emp.is_department_head,
+        "is_active": emp.is_active,
+        "created_at": emp.created_at.isoformat() if emp.created_at else None,
+    }
 
 
 @router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("admin", "hr")),
+    user = Depends(require_role("admin", "hr")),
 ):
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:

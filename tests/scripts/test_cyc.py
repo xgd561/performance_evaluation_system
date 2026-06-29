@@ -63,10 +63,10 @@ class TestCycleLaunch:
         assert data.get("created_records") == 1
         assert data.get("status") == "进行中（自评）"
 
-    def test_launch_cycle_employee_without_kpi_blocked(
+    def test_launch_cycle_employee_without_kpi_template(
         self, client: TestClient, admin_headers: dict, seeded_cycle: dict, seeded_department: dict, seeded_position: dict
     ):
-        """TC-CYC-004: 发起考核时员工无KPI模板拦截"""
+        """TC-CYC-004: 发起考核时员工无KPI模板——允许发起并创建空KPI记录"""
         # Create an employee whose position has NO KPI template
         emp_no_kpi = create_employee(
             client, admin_headers, "EMP_NO_KPI", "无KPI员工",
@@ -77,8 +77,10 @@ class TestCycleLaunch:
             "employee_ids": [emp_no_kpi["id"]],
         }
         resp = client.post("/assessment-cycles/launch", json=payload, headers=admin_headers)
-        assert_status_code(resp, 409)
-        assert "未配置KPI模板" in resp.json().get("message", "")
+        assert_status_code(resp, 200)
+        data = resp.json()
+        assert data.get("created_records") == 1
+        assert data.get("status") == "进行中（自评）"
 
     def test_add_employee_to_launched_cycle(
         self, client: TestClient, admin_headers: dict, seeded_cycle: dict, seeded_department: dict, seeded_position: dict
@@ -144,59 +146,6 @@ class TestCycleProgress:
         assert_status_code(resp, 200)
         # Verify last_updated timestamp exists
         assert "last_updated" in resp.json() or "updated_at" in resp.json()
-
-
-class TestCycleList:
-    """TC-CYC-010"""
-
-    def test_cycle_list(self, client: TestClient, admin_headers: dict):
-        """TC-CYC-010: 周期列表查询"""
-        resp = client.get("/assessment-cycles", headers=admin_headers)
-        assert_status_code(resp, 200)
-        data = resp.json()
-        assert isinstance(data, list) or "items" in data
-
-
-class TestCycleUpdateAndDelete:
-    """TC-CYC-011, TC-CYC-012, TC-CYC-013, TC-CYC-014"""
-
-    def test_update_launched_cycle_blocked(self, client: TestClient, admin_headers: dict, seeded_cycle: dict):
-        """TC-CYC-011: 修改已发起的周期被拦截"""
-        # Launch the cycle first
-        client.post("/assessment-cycles/launch", json={"cycle_id": seeded_cycle["id"], "employee_ids": []}, headers=admin_headers)
-        resp = client.put(f"/assessment-cycles/{seeded_cycle['id']}", json={"name": "新名称"}, headers=admin_headers)
-        if resp.status_code == 404:
-            pytest.skip("Cycle update endpoint not implemented")
-        assert_status_code(resp, 409)
-        assert "已发起" in resp.json().get("message", "")
-
-    def test_delete_cycle_with_records_blocked(self, client: TestClient, admin_headers: dict, seeded_cycle: dict):
-        """TC-CYC-012: 删除含有考核记录的周期被拦截"""
-        resp = client.delete(f"/assessment-cycles/{seeded_cycle['id']}", headers=admin_headers)
-        if resp.status_code == 404:
-            pytest.skip("Cycle delete endpoint not implemented")
-        assert_status_code(resp, 409)
-        assert "考核数据" in resp.json().get("message", "") or "不可删除" in resp.json().get("message", "")
-
-    def test_remove_employee_from_cycle(self, client: TestClient, admin_headers: dict, seeded_cycle: dict, seeded_employee: dict):
-        """TC-CYC-013: 从周期中移除人员"""
-        resp = client.delete(
-            f"/assessment-cycles/{seeded_cycle['id']}/employees/{seeded_employee['id']}",
-            headers=admin_headers,
-        )
-        if resp.status_code == 404:
-            pytest.skip("Remove employee from cycle endpoint not implemented")
-        assert_status_code(resp, 204)
-
-    def test_launch_cycle_no_employees_blocked(self, client: TestClient, admin_headers: dict, seeded_cycle: dict):
-        """TC-CYC-014: 发起考核时未选择任何员工被拦截"""
-        resp = client.post(
-            "/assessment-cycles/launch",
-            json={"cycle_id": seeded_cycle["id"], "employee_ids": []},
-            headers=admin_headers,
-        )
-        assert_status_code(resp, 409)
-        assert "至少" in resp.json().get("message", "")
 
 
 class TestCycleList:

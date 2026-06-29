@@ -119,6 +119,11 @@ def update_dimension_weights(
     weights = {}
     for k, v in data.items():
         if isinstance(v, (int, float)):
+            if v < 0:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"权重不能为负数: {k}={v}",
+                )
             weights[k] = v
 
     total = sum(weights.values())

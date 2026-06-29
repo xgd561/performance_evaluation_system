@@ -6,22 +6,31 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "vue": "^3.4.27",
-    "vue-router": "^4.3.3",
-    "pinia": "^2.1.7",
-    "element-plus": "^2.7.5",
     "@element-plus/icons-vue": "^2.3.1",
     "axios": "^1.7.2",
     "echarts": "^5.5.0",
+    "element-plus": "^2.7.5",
+    "js-cookie": "^3.0.5",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.27",
     "vue-echarts": "^6.7.3",
-    "js-cookie": "^3.0.5"
+    "vue-router": "^4.3.3"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
     "@vitejs/plugin-vue": "^5.0.5",
+    "@vitest/coverage-v8": "^4.1.9",
+    "@vue/test-utils": "^2.4.11",
+    "jsdom": "^29.1.1",
+    "resize-observer-polyfill": "^1.5.1",
+    "sass": "^1.77.6",
     "vite": "^5.3.1",
-    "sass": "^1.77.6"
+    "vitest": "^4.1.9"
   }
 }

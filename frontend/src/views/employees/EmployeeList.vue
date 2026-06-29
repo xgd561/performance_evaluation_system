@@ -56,8 +56,8 @@
         :total="total"
         layout="total, sizes, prev, pager, next"
         :page-sizes="[10, 20, 50]"
-        @size-change="handleSearch"
-        @current-change="handleSearch"
+        @size-change="handlePageChange"
+        @current-change="handlePageChange"
       />
     </el-card>
 
@@ -190,6 +190,10 @@ async function loadPositions(deptId) {
 
 function handleSearch() {
   queryForm.page = 1
+  loadData()
+}
+
+function handlePageChange() {
   loadData()
 }
 
