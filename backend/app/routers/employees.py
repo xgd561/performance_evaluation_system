@@ -13,6 +13,7 @@ except ImportError:
 from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import Employee, Department, Position, AssessmentRecord, User
+from app.services.operation_logger import log_operation
 from app.schemas import (
     EmployeeCreate,
     EmployeeUpdate,
@@ -21,6 +22,12 @@ from app.schemas import (
     StandardResponse,
 )
 
+from app.services.operation_logger import log_operation
+
+from app.services.operation_logger import log_operation
+
+from app.services.operation_logger import log_operation
+
 router = APIRouter()
 
 
@@ -28,7 +35,7 @@ router = APIRouter()
 def download_template(
     type: str = Query("empty", description="empty or sample"),
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("admin", "hr")),
+    user: User = Depends(require_role("admin", "hr", "executive")),
 ):
     if not OPENPYXL_AVAILABLE:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="openpyxl未安装")
@@ -184,7 +191,7 @@ def import_employees(
 def import_preview(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("admin", "hr")),
+    user: User = Depends(require_role("admin", "hr", "executive")),
 ):
     if not OPENPYXL_AVAILABLE:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="openpyxl未安装")
@@ -207,7 +214,7 @@ def import_preview(
 
 
 @router.get("/import/status")
-def import_status(user: User = Depends(require_role("admin", "hr"))):
+def import_status(user: User = Depends(require_role("admin", "hr", "executive"))):
     return {"status": "ready", "progress": 100}
 
 
@@ -224,6 +231,21 @@ def list_employees(
     user = Depends(get_current_user),
 ):
     query = db.query(Employee).filter(Employee.is_active == True)
+
+    # 数据隔离：employee 只能查看自己
+    if user.role == "employee":
+        query = query.filter(Employee.id == user.employee_id)
+    # 数据隔离：manager 只能查看本部门及子部门员工及下属
+    elif user.role == "manager":
+        current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
+        if current_employee and current_employee.department_id:
+            dept_ids = get_all_dept_ids(db, current_employee.department_id)
+            query = query.filter(
+                (Employee.department_id.in_(dept_ids)) |
+                (Employee.manager_id == current_employee.id)
+            )
+        elif current_employee:
+            query = query.filter(Employee.manager_id == current_employee.id)
 
     if employee_no:
         query = query.filter(Employee.employee_no == employee_no)
@@ -282,11 +304,32 @@ def list_employees(
 def get_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    user = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     emp = db.query(Employee).filter(Employee.id == employee_id, Employee.is_active == True).first()
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工不存在")
+
+    # P0-7: Data isolation
+    if user.role == "peer":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
+    elif user.role == "employee":
+        if user.employee_id != employee_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
+    elif user.role == "manager":
+        current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
+        if not current_employee:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
+        dept_ids = get_all_dept_ids(db, current_employee.department_id)
+        allowed = (
+            emp.department_id in dept_ids
+            or emp.manager_id == current_employee.id
+            or _is_in_subordinate_chain(db, current_employee.id, employee_id)
+        )
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
+    # admin, hr, executive: allow all
+
     return {
         "id": emp.id,
         "employee_no": emp.employee_no,
@@ -308,7 +351,7 @@ def get_employee(
 def get_subordinates(
     employee_id: int,
     db: Session = Depends(get_db),
-    user = Depends(require_role("manager", "admin", "hr")),
+    user: User = Depends(require_role("manager", "admin", "hr")),
 ):
     """获取某员工的直属下属列表"""
     emp = db.query(Employee).filter(Employee.id == employee_id, Employee.is_active == True).first()
@@ -337,6 +380,38 @@ def get_subordinates(
     return result
 
 
+def get_all_dept_ids(db: Session, department_id: int, visited: set = None) -> set:
+    """Recursively collect the given department and all its sub-department IDs."""
+    if department_id is None:
+        return set()
+    if visited is None:
+        visited = set()
+    if department_id in visited:
+        return set()
+    visited.add(department_id)
+    dept_ids = {department_id}
+    children = db.query(Department.id).filter(Department.parent_id == department_id).all()
+    for child_id in children:
+        dept_ids.update(get_all_dept_ids(db, child_id[0], visited))
+    return dept_ids
+
+
+def _is_in_subordinate_chain(db: Session, manager_id: int, target_id: int) -> bool:
+    """Check if target_id is a direct or indirect subordinate of manager_id."""
+    if manager_id == target_id:
+        return False
+    current = target_id
+    max_depth = 20
+    for _ in range(max_depth):
+        emp = db.query(Employee).filter(Employee.id == current).first()
+        if not emp or emp.manager_id is None:
+            return False
+        if emp.manager_id == manager_id:
+            return True
+        current = emp.manager_id
+    return False
+
+
 def _resolve_manager_id(db: Session, manager_employee_no: Optional[str], fallback_manager_id: Optional[int] = None) -> Optional[int]:
     """Look up manager_id by employee_no. If manager_employee_no is provided and not empty, return the resolved id. Otherwise return the fallback."""
     if manager_employee_no is not None:
@@ -352,7 +427,7 @@ def _resolve_manager_id(db: Session, manager_employee_no: Optional[str], fallbac
 def create_employee(
     req: EmployeeCreate,
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin", "hr")),
+    user: User = Depends(require_role("admin", "hr")),
 ):
     # Check duplicate employee_no
     existing = db.query(Employee).filter(Employee.employee_no == req.employee_no).first()
@@ -395,6 +470,16 @@ def create_employee(
     db.add(emp)
     db.commit()
     db.refresh(emp)
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="create_employee",
+        target_type="employee",
+        target_id=emp.id,
+        new_value={"employee_no": emp.employee_no, "name": emp.name},
+    )
+
     return {
         "id": emp.id,
         "employee_no": emp.employee_no,
@@ -417,7 +502,7 @@ def update_employee(
     employee_id: int,
     req: EmployeeUpdate,
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin", "hr")),
+    user: User = Depends(require_role("admin", "hr")),
 ):
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
@@ -463,6 +548,16 @@ def update_employee(
         setattr(emp, field, value)
     db.commit()
     db.refresh(emp)
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="update_employee",
+        target_type="employee",
+        target_id=employee_id,
+        new_value={"employee_no": emp.employee_no, "name": emp.name},
+    )
+
     return {
         "id": emp.id,
         "employee_no": emp.employee_no,
@@ -484,7 +579,7 @@ def update_employee(
 def delete_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin", "hr")),
+    user: User = Depends(require_role("admin", "hr")),
 ):
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
@@ -500,4 +595,14 @@ def delete_employee(
 
     db.delete(emp)
     db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="delete_employee",
+        target_type="employee",
+        target_id=employee_id,
+        old_value={"employee_no": emp.employee_no, "name": emp.name},
+    )
+
     return

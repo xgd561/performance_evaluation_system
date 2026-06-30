@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from typing import List
 import json
 
 from app.database import get_db
@@ -14,7 +15,12 @@ from app.schemas import (
     LaunchCycleRequest,
     AddEmployeesToCycleRequest,
     StandardResponse,
+    CycleEmployeeOut,
 )
+
+from app.services.operation_logger import log_operation
+
+from app.services.operation_logger import log_operation
 
 router = APIRouter()
 
@@ -126,6 +132,17 @@ def update_cycle(
             setattr(cycle, field, value)
     db.commit()
     db.refresh(cycle)
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="update_cycle",
+        target_type="assessment_cycle",
+        target_id=cycle_id,
+        old_value={"name": cycle.name},
+        new_value={"name": cycle.name, "status": cycle.status},
+    )
+
     return {
         "id": cycle.id,
         "name": cycle.name,
@@ -218,6 +235,17 @@ def launch_cycle(
 
     cycle.status = "pending_self"
     db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="launch_cycle",
+        target_type="assessment_cycle",
+        target_id=cycle.id,
+        old_value={"status": "not_started"},
+        new_value={"status": "pending_self", "created_records": created, "employee_ids": req.employee_ids},
+    )
+
     return {"created_records": created, "status": "进行中（自评）"}
 
 
@@ -283,11 +311,50 @@ def remove_employee_from_cycle(
     return
 
 
+@router.get("/{cycle_id}/employees", response_model=List[CycleEmployeeOut])
+def list_cycle_employees(
+    cycle_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr")),
+):
+    """查询考核周期已参与人员列表"""
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
+
+    cycle_employees = (
+        db.query(CycleEmployee)
+        .filter(CycleEmployee.cycle_id == cycle_id)
+        .all()
+    )
+
+    result = []
+    for ce in cycle_employees:
+        emp = db.query(Employee).filter(Employee.id == ce.employee_id).first()
+        dept_name = emp.department.name if emp and emp.department else None
+        pos_name = emp.position.name if emp and emp.position else None
+        result.append({
+            "id": ce.id,
+            "cycle_id": ce.cycle_id,
+            "employee_id": ce.employee_id,
+            "employee_no": emp.employee_no if emp else None,
+            "name": emp.name if emp else None,
+            "department_id": emp.department_id if emp else None,
+            "department_name": dept_name,
+            "position_id": emp.position_id if emp else None,
+            "position_name": pos_name,
+            "status": ce.status,
+            "added_at": ce.added_at,
+        })
+
+    return result
+
+
 @router.get("/{cycle_id}/progress")
 def cycle_progress(
     cycle_id: int,
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin", "hr")),
+    user = Depends(require_role("admin", "hr", "executive")),
 ):
     cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
     if not cycle:
@@ -316,3 +383,111 @@ def cycle_progress(
         "completed": completed,
         "last_updated": cycle.updated_at.isoformat() if cycle.updated_at else cycle.created_at.isoformat() if cycle.created_at else None,
     }
+
+
+@router.post("/{cycle_id}/cancel")
+def cancel_cycle(
+    cycle_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr")),
+):
+    """取消考核周期"""
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
+
+    cycle.status = "cancelled"
+    db.query(AssessmentRecord).filter(AssessmentRecord.cycle_id == cycle_id).update({"status": "cancelled"})
+    db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="cancel_cycle",
+        target_type="assessment_cycle",
+        target_id=cycle_id,
+        new_value={"status": "cancelled"},
+    )
+
+    return {"message": "考核周期已取消", "cycle_id": cycle_id}
+
+
+@router.post("/{cycle_id}/archive")
+def archive_cycle(
+    cycle_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr")),
+):
+    """归档考核周期"""
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
+
+    if cycle.status not in ["published"]:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="只有已发布的考核周期才能归档")
+
+    cycle.status = "archived"
+    cycle.is_locked = True
+    db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="archive_cycle",
+        target_type="assessment_cycle",
+        target_id=cycle_id,
+        new_value={"status": "archived", "is_locked": True},
+    )
+
+    return {"message": "考核周期已归档", "cycle_id": cycle_id}
+
+
+@router.post("/{cycle_id}/publish")
+def publish_cycle(
+    cycle_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr")),
+):
+    """发布考核周期结果（pending_interview → published）"""
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
+
+    # 校验该周期下是否还有未到达 pending_interview 状态的记录
+    unfinished = db.query(AssessmentRecord).filter(
+        AssessmentRecord.cycle_id == cycle_id,
+        AssessmentRecord.status.notin_(["pending_interview", "published", "archived"]),
+    ).count()
+    if unfinished > 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"该周期尚有 {unfinished} 条考核记录未完成审批，无法发布",
+        )
+
+    # 批量将 pending_interview 记录改为 published
+    pending_count = db.query(AssessmentRecord).filter(
+        AssessmentRecord.cycle_id == cycle_id,
+        AssessmentRecord.status == "pending_interview",
+    ).count()
+
+    db.query(AssessmentRecord).filter(
+        AssessmentRecord.cycle_id == cycle_id,
+        AssessmentRecord.status == "pending_interview",
+    ).update({"status": "published"})
+
+    # 更新周期状态
+    old_cycle_status = cycle.status
+    cycle.status = "published"
+    db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="publish_cycle",
+        target_type="assessment_cycle",
+        target_id=cycle_id,
+        old_value={"status": old_cycle_status},
+        new_value={"status": "published", "updated_records": pending_count},
+    )
+
+    return {"message": "考核结果已发布", "cycle_id": cycle_id, "updated_records": pending_count}

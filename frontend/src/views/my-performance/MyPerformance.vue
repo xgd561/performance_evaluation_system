@@ -48,10 +48,16 @@
         <div class="card-title">历史考核记录</div>
         <el-table :data="records" style="width: 100%">
           <el-table-column prop="cycle_name" label="考核周期" />
-          <el-table-column prop="total_score" label="总分" />
+          <el-table-column prop="total_score" label="总分">
+            <template #default="{ row }">
+              <span v-if="row.status === 'published' || row.status === 'archived'">{{ row.total_score }}</span>
+              <span v-else class="empty">-</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="grade" label="等级">
             <template #default="{ row }">
-              <el-tag :type="gradeTagType(row.grade)" size="small">{{ row.grade }}</el-tag>
+              <el-tag v-if="row.status === 'published' || row.status === 'archived'" :type="gradeTagType(row.grade)" size="small">{{ row.grade }}</el-tag>
+              <span v-else class="empty">-</span>
             </template>
           </el-table-column>
           <el-table-column prop="status" label="状态">
@@ -61,7 +67,8 @@
           </el-table-column>
           <el-table-column label="操作">
             <template #default="{ row }">
-              <el-button link type="primary" @click="viewDetail(row)">查看详情</el-button>
+              <el-button v-if="row.status === 'published' || row.status === 'archived'" link type="primary" @click="viewDetail(row)">查看详情</el-button>
+              <span v-else class="empty">待发布</span>
               <el-button
                 v-if="row.status === 'published' && !row.hasAppeal"
                 link
@@ -74,16 +81,97 @@
           </el-table-column>
         </el-table>
       </el-card>
+
+      <!-- 详情抽屉 -->
+      <el-drawer
+        v-model="detailDrawerVisible"
+        :title="detailTitle"
+        size="60%"
+        :with-header="true"
+        destroy-on-close
+      >
+        <div v-if="detailLoading" class="loading-wrap">
+          <el-skeleton :rows="8" animated />
+        </div>
+        <div v-else-if="detailRecord" class="detail-content">
+          <!-- 基本信息 -->
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="考核周期">{{ detailRecord.cycle_name }}</el-descriptions-item>
+            <el-descriptions-item label="考核状态">
+              <el-tag :type="statusTagType(detailRecord.status)" size="small">{{ statusText(detailRecord.status) }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="总分">{{ detailRecord.total_score || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="等级">
+              <el-tag :type="gradeTagType(detailRecord.grade)" size="small">{{ detailRecord.grade || '-' }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="部门">{{ detailRecord.department_name || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="岗位">{{ detailRecord.position_name || '-' }}</el-descriptions-item>
+          </el-descriptions>
+
+          <!-- 三维评分对比 -->
+          <div class="section-title">三维评分对比</div>
+          <el-table :data="dimensionCompareData" border style="width: 100%">
+            <el-table-column prop="dimension" label="维度" />
+            <el-table-column prop="self" label="自评" />
+            <el-table-column prop="manager" label="上级评" />
+            <el-table-column prop="peer" label="协作评" />
+            <el-table-column prop="weighted" label="加权得分" />
+          </el-table>
+
+          <!-- KPI 评分明细 -->
+          <div v-if="detailRecord.kpi_details?.length" class="section-title">KPI 评分明细</div>
+          <el-table v-if="detailRecord.kpi_details?.length" :data="detailRecord.kpi_details" border style="width: 100%">
+            <el-table-column prop="kpi_name" label="KPI 名称" />
+            <el-table-column prop="weight" label="权重" />
+            <el-table-column prop="target_value" label="目标值" />
+            <el-table-column prop="self_score" label="自评得分" />
+            <el-table-column prop="manager_score" label="上级评分" />
+          </el-table>
+
+          <!-- 上级评语 -->
+          <div v-if="detailRecord.manager_comment" class="section-title">上级评语</div>
+          <el-card v-if="detailRecord.manager_comment" shadow="never" class="comment-card">
+            {{ detailRecord.manager_comment }}
+          </el-card>
+
+          <!-- 申诉记录 -->
+          <div v-if="detailRecord.appeal" class="section-title">申诉记录</div>
+          <el-descriptions v-if="detailRecord.appeal" :column="1" border>
+            <el-descriptions-item label="申诉原因">{{ detailRecord.appeal.reason }}</el-descriptions-item>
+            <el-descriptions-item label="申诉详情">{{ detailRecord.appeal.detail || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="申诉状态">
+              <el-tag :type="appealStatusTag(detailRecord.appeal.status)" size="small">{{ appealStatusText(detailRecord.appeal.status) }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailRecord.appeal.review_result" label="处理结果">{{ detailRecord.appeal.review_result }}</el-descriptions-item>
+            <el-descriptions-item v-if="detailRecord.appeal.reviewer_name" label="处理人">{{ detailRecord.appeal.reviewer_name }}</el-descriptions-item>
+          </el-descriptions>
+
+          <!-- 面谈记录 -->
+          <div v-if="detailRecord.interview" class="section-title">面谈记录</div>
+          <el-descriptions v-if="detailRecord.interview" :column="1" border>
+            <el-descriptions-item label="面谈时间">{{ detailRecord.interview.interview_time || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="面谈地点">{{ detailRecord.interview.location || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="面谈人">{{ detailRecord.interview.interviewer_name || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="面谈内容">{{ detailRecord.interview.content || '-' }}</el-descriptions-item>
+            <el-descriptions-item v-if="detailRecord.interview.improvement_plan" label="改进计划">{{ detailRecord.interview.improvement_plan }}</el-descriptions-item>
+          </el-descriptions>
+
+          <!-- 操作按钮 -->
+          <div class="detail-actions">
+            <el-button type="primary" @click="downloadPdf">下载 PDF 档案</el-button>
+          </div>
+        </div>
+      </el-drawer>
     </div>
   </PageContainer>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
-import { getMyAssessment } from '@/api/scores'
+import { getMyAssessment, getAssessmentDetail, downloadRecordPdf } from '@/api/scores'
 import { getEmployeeTrend } from '@/api/reports'
 import { useAuthStore } from '@/stores/auth'
 
@@ -93,6 +181,36 @@ const loading = ref(false)
 const records = ref([])
 const currentRecord = ref(null)
 const chartRef = ref(null)
+
+const detailDrawerVisible = ref(false)
+const detailLoading = ref(false)
+const detailRecord = ref(null)
+const detailRecordId = ref(null)
+
+const detailTitle = computed(() => {
+  return detailRecord.value ? `${detailRecord.value.cycle_name} - 考核详情` : '考核详情'
+})
+
+const dimensionCompareData = computed(() => {
+  if (!detailRecord.value) return []
+  const dims = [
+    { key: 'performance', label: '业绩' },
+    { key: 'ability', label: '能力' },
+    { key: 'attitude', label: '态度' },
+  ]
+  const map = {
+    performance: 'weighted_performance',
+    ability: 'weighted_ability',
+    attitude: 'weighted_attitude',
+  }
+  return dims.map(d => ({
+    dimension: d.label,
+    self: detailRecord.value.self_scores?.[d.key] ?? '-',
+    manager: detailRecord.value.manager_scores?.[d.key] ?? '-',
+    peer: detailRecord.value.peer_scores?.[d.key] ?? '-',
+    weighted: detailRecord.value[map[d.key]] ?? '-',
+  }))
+})
 
 const employeeId = computed(() => authStore.user?.employee_id)
 
@@ -226,7 +344,52 @@ function goSelfAssessment() {
 }
 
 function viewDetail(row) {
-  ElMessage.info('查看详情功能开发中')
+  detailRecordId.value = row.record_id
+  detailDrawerVisible.value = true
+  loadDetail()
+}
+
+async function loadDetail() {
+  if (!detailRecordId.value) return
+  detailLoading.value = true
+  try {
+    const res = await getAssessmentDetail(detailRecordId.value)
+    detailRecord.value = res
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('加载详情失败')
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+async function downloadPdf() {
+  if (!detailRecordId.value) return
+  try {
+    const res = await downloadRecordPdf(detailRecordId.value)
+    const blob = new Blob([res], { type: 'application/pdf' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `performance_${detailRecordId.value}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('PDF 下载失败')
+  }
+}
+
+function appealStatusTag(status) {
+  const map = { pending: 'warning', approved: 'success', rejected: 'danger' }
+  return map[status] || 'info'
+}
+
+function appealStatusText(status) {
+  const map = { pending: '待处理', approved: '已通过', rejected: '已驳回' }
+  return map[status] || status
 }
 
 function goAppeal(row) {
@@ -322,5 +485,27 @@ function goAppeal(row) {
 .card-title {
   font-weight: bold;
   margin-bottom: 16px;
+}
+
+.detail-content {
+  padding: 0 8px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 20px 0 12px;
+  color: #303133;
+}
+
+.comment-card {
+  background: #f5f7fa;
+  color: #606266;
+  line-height: 1.6;
+}
+
+.detail-actions {
+  margin-top: 24px;
+  text-align: center;
 }
 </style>

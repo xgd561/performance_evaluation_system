@@ -7,6 +7,7 @@ from app.auth import get_current_user, require_role
 from app.models import (
     AssessmentCycle, Employee, AssessmentRecord, CycleEmployee, ApprovalRecord, AppealRecord, InterviewRecord, User, PeerReviewer
 )
+from app.routers.employees import get_all_dept_ids
 
 router = APIRouter()
 
@@ -22,16 +23,62 @@ def get_dashboard(
             detail="请先修改初始密码",
         )
 
-    cycle_count = db.query(AssessmentCycle).count()
-    employee_count = db.query(Employee).filter(Employee.is_active == True).count()
-    pending_approvals = db.query(ApprovalRecord).filter(ApprovalRecord.action == None).count()
-    pending_appeals = db.query(AppealRecord).filter(AppealRecord.status == "pending").count()
+    total_cycles = db.query(AssessmentCycle).count()
+
+    if user.role in ("admin", "hr", "executive"):
+        # Admin/HR/Executive: global stats
+        employee_count = db.query(Employee).filter(Employee.is_active == True).count()
+        pending_approvals = db.query(ApprovalRecord).filter(ApprovalRecord.action == None).count()
+        pending_appeals = db.query(AppealRecord).filter(AppealRecord.status == "pending").count()
+    elif user.role == "manager":
+        # Manager: team stats (subordinates + department tree)
+        current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
+        if current_employee:
+            subordinate_ids = [sid[0] for sid in db.query(Employee.id).filter(Employee.manager_id == current_employee.id).all()]
+            dept_ids = get_all_dept_ids(db, current_employee.department_id)
+            dept_emp_ids = [eid[0] for eid in db.query(Employee.id).filter(Employee.department_id.in_(dept_ids)).all()]
+            all_visible_ids = set(subordinate_ids) | set(dept_emp_ids) | {current_employee.id}
+
+            employee_count = len(all_visible_ids)
+            pending_approvals = db.query(ApprovalRecord).filter(
+                ApprovalRecord.approver_id.in_(list(all_visible_ids)),
+                ApprovalRecord.action == None
+            ).count()
+            pending_appeals = db.query(AppealRecord).filter(
+                AppealRecord.employee_id.in_(list(all_visible_ids)),
+                AppealRecord.status == "pending"
+            ).count()
+        else:
+            employee_count = 0
+            pending_approvals = 0
+            pending_appeals = 0
+    elif user.role in ("employee", "peer"):
+        # Employee/Peer: only own stats
+        current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
+        if current_employee:
+            employee_count = 1
+            pending_approvals = db.query(ApprovalRecord).filter(
+                ApprovalRecord.approver_id == current_employee.id,
+                ApprovalRecord.action == None
+            ).count()
+            pending_appeals = db.query(AppealRecord).filter(
+                AppealRecord.employee_id == current_employee.id,
+                AppealRecord.status == "pending"
+            ).count()
+        else:
+            employee_count = 0
+            pending_approvals = 0
+            pending_appeals = 0
+    else:
+        employee_count = 0
+        pending_approvals = 0
+        pending_appeals = 0
 
     recent_cycles = db.query(AssessmentCycle).order_by(AssessmentCycle.created_at.desc()).limit(5).all()
 
     return {
         "stats": {
-            "total_cycles": cycle_count,
+            "total_cycles": total_cycles,
             "total_employees": employee_count,
             "pending_approvals": pending_approvals,
             "pending_appeals": pending_appeals,
@@ -53,7 +100,7 @@ def get_dashboard(
 @router.get("/cycles")
 def dashboard_cycles(
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin", "hr")),
+    user = Depends(require_role("admin", "hr", "executive")),
 ):
     cycles = db.query(AssessmentCycle).all()
     return {

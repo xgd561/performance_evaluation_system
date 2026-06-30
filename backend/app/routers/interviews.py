@@ -12,6 +12,8 @@ from app.models import (
     AssessmentCycle
 )
 
+from app.routers.employees import _is_in_subordinate_chain, get_all_dept_ids
+
 router = APIRouter()
 
 class InterviewCreate(BaseModel):
@@ -126,7 +128,7 @@ def create_interview(
 def get_interview(
     record_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("manager", "hr", "admin", "employee")),
+    user: User = Depends(require_role("manager", "hr", "admin", "employee", "executive")),
 ):
     """获取面谈详情"""
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
@@ -137,11 +139,31 @@ def get_interview(
     if not interview:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="面谈记录不存在")
 
+    # P0-9: Data isolation
+    if user.role == "employee":
+        if user.employee_id != record.employee_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看")
+    elif user.role == "manager":
+        current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
+        if not current_employee:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
+        dept_ids = get_all_dept_ids(db, current_employee.department_id)
+        allowed = (
+            current_employee.id == record.employee_id
+            or _is_in_subordinate_chain(db, current_employee.id, record.employee_id)
+            or record.department_id in dept_ids
+        )
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
+    # admin, hr, executive: allow all
+
+    interviewer = db.query(Employee).filter(Employee.id == interview.interviewer_id).first()
+
     return {
         "id": interview.id,
         "record_id": interview.record_id,
         "interviewer_id": interview.interviewer_id,
-        "interviewer_name": interview.interviewer.name if interview.interviewer else None,
+        "interviewer_name": interviewer.name if interviewer else None,
         "interview_time": interview.interview_time.isoformat() if interview.interview_time else None,
         "location": interview.location,
         "content": interview.content,
@@ -204,11 +226,27 @@ def update_interview(
 def get_employee_interview_history(
     employee_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("manager", "hr", "admin", "employee")),
+    user: User = Depends(require_role("manager", "hr", "admin", "employee", "executive")),
 ):
     """获取员工面谈历史"""
-    if user.role == "employee" and user.employee_id != employee_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看")
+    # P0-10: Data isolation
+    if user.role == "employee":
+        if user.employee_id != employee_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看")
+    elif user.role == "manager":
+        current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
+        if not current_employee:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
+        target_employee = db.query(Employee).filter(Employee.id == employee_id).first()
+        dept_ids = get_all_dept_ids(db, current_employee.department_id)
+        allowed = (
+            current_employee.id == employee_id
+            or _is_in_subordinate_chain(db, current_employee.id, employee_id)
+            or (target_employee and target_employee.department_id in dept_ids)
+        )
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
+    # admin, hr, executive: allow all
 
     records = db.query(AssessmentRecord).filter(AssessmentRecord.employee_id == employee_id).all()
     result = []

@@ -12,6 +12,8 @@ from app.schemas import (
     SmallDeptExemptionConfig,
 )
 
+from app.services.operation_logger import log_operation
+
 router = APIRouter()
 
 
@@ -86,6 +88,16 @@ def update_grade_rules(
     cfg = _get_or_create_config(db, "grade_rules", "{}")
     cfg.value = json.dumps(parsed)
     db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="update_grade_rules",
+        target_type="system_config",
+        target_id=cfg.id,
+        new_value={"grade_rules": parsed},
+    )
+
     return {"code": 200, "message": "等级规则已更新"}
 
 
@@ -136,6 +148,16 @@ def update_dimension_weights(
     cfg = _get_or_create_config(db, "dimension_weights", "{}")
     cfg.value = json.dumps(weights)
     db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="update_dimension_weights",
+        target_type="system_config",
+        target_id=cfg.id,
+        new_value={"dimension_weights": weights},
+    )
+
     return {"code": 200, "message": "维度权重已更新"}
 
 
@@ -170,6 +192,16 @@ def update_reviewer_weights(
     cfg = _get_or_create_config(db, "reviewer_weights", "{}")
     cfg.value = json.dumps(data)
     db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="update_reviewer_weights",
+        target_type="system_config",
+        target_id=cfg.id,
+        new_value={"reviewer_weights": data},
+    )
+
     return {"code": 200, "message": "评分人权重已更新"}
 
 
@@ -194,4 +226,14 @@ def update_small_dept_exemption(
     cfg = _get_or_create_config(db, "small_dept_exemption", "{}")
     cfg.value = json.dumps(req)
     db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="update_small_dept_exemption",
+        target_type="system_config",
+        target_id=cfg.id,
+        new_value={"small_dept_exemption": req},
+    )
+
     return {"code": 200, "message": "小部门豁免配置已保存", "enabled": req.get("enabled"), "threshold": req.get("threshold")}

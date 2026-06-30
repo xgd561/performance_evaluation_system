@@ -4,6 +4,26 @@
       <!-- 左侧：被评人信息面板 -->
       <div class="employee-panel">
         <div class="panel-card">
+          <!-- 待评人选择器 -->
+          <div class="record-selector" v-if="toReviewList.length > 1">
+            <el-select
+              v-model="selectedRecordId"
+              placeholder="选择被评人"
+              style="width: 100%"
+              @change="selectRecord"
+            >
+              <el-option
+                v-for="item in toReviewList"
+                :key="item.record_id"
+                :label="`${item.employee_name} (${item.employee_no})`"
+                :value="item.record_id"
+              />
+            </el-select>
+            <el-divider />
+          </div>
+          <div v-else-if="toReviewList.length === 0" class="no-record-tip">
+            <el-empty description="暂无待评人员" />
+          </div>
           <div class="employee-avatar">
             <el-avatar :size="64" :icon="UserFilled" />
           </div>
@@ -139,13 +159,13 @@
             <el-button
               type="primary"
               size="large"
-              :disabled="!canSubmit"
+              :disabled="!canSubmit || submitting"
               :loading="submitting"
               @click="handleSubmit"
             >
               提交评分
             </el-button>
-            <el-button size="large" @click="handleSaveDraft">保存草稿</el-button>
+            <el-button size="large" :loading="savingDraft" @click="handleSaveDraft">保存草稿</el-button>
           </div>
         </el-form>
       </div>
@@ -165,10 +185,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getToReviewList, submitManagerScore } from '@/api/scores'
+import { getToReviewList, submitManagerScore, getManagerDraft, saveManagerDraft, deleteManagerDraft } from '@/api/scores'
 import { useAuthStore } from '@/stores/auth'
 import { SCORE_ANCHORS, DIMENSION_TEXT } from '@/utils/constants'
 
@@ -184,29 +204,41 @@ const mode = computed(() => {
   return 'self'
 })
 
-const pageTitle = computed(() => {
-  const titles = { self: '自评', manager: '上级评分', peer: '协作评分' }
-  return `${titles[mode.value] || '评分'} - ${employeeInfo.name}`
+// 加载状态
+const loading = ref(false)
+const toReviewList = ref([])
+const selectedRecordId = ref(null)
+const currentRecord = ref(null)
+
+// 被评人信息（从 currentRecord 派生）
+const employeeInfo = computed(() => {
+  if (!currentRecord.value) {
+    return { name: '-', department: '-', position: '-', cycleName: '-', stage: '-', deadline: null }
+  }
+  const r = currentRecord.value
+  return {
+    name: r.employee_name || '-',
+    department: r.department_name || '-',
+    position: r.position_name || '-',
+    cycleName: r.cycle_name || '-',
+    stage: '上级评分中',
+    deadline: r.manager_due_date ? new Date(r.manager_due_date) : new Date(Date.now() + 5 * 24 * 60 * 60 * 1000)
+  }
 })
 
-// 被评人信息（mock）
-const employeeInfo = reactive({
-  name: '张三',
-  department: '技术部',
-  position: 'Java 开发工程师',
-  cycleName: '2026年Q2季度考核',
-  stage: '上级评分中',
-  deadline: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000) // 5天后截止
+const pageTitle = computed(() => {
+  const titles = { self: '自评', manager: '上级评分', peer: '协作评分' }
+  return `${titles[mode.value] || '评分'} - ${employeeInfo.value.name}`
 })
 
 const stageTagType = computed(() => {
   const map = { '自评中': 'warning', '上级评分中': 'primary', '协作评分中': 'success' }
-  return map[employeeInfo.stage] || 'info'
+  return map[employeeInfo.value.stage] || 'info'
 })
 
 // 倒计时
 const countdownDays = computed(() => {
-  const diff = employeeInfo.deadline - Date.now()
+  const diff = employeeInfo.value.deadline - Date.now()
   return Math.ceil(diff / (24 * 60 * 60 * 1000))
 })
 const countdownText = computed(() => {
@@ -215,39 +247,54 @@ const countdownText = computed(() => {
 })
 
 // 员工自评参考（上级评分时显示）
-const selfScores = reactive({
-  performance: 85,
-  ability: 90,
-  attitude: 88
+const selfScores = computed(() => {
+  if (!currentRecord.value || !currentRecord.value.self_scores) {
+    return { performance: null, ability: null, attitude: null }
+  }
+  const s = currentRecord.value.self_scores
+  return { performance: s.performance, ability: s.ability, attitude: s.attitude }
 })
 
-// 维度定义
+// 维度定义（从系统配置或常量获取，也可由后端返回）
 const dimensions = [
   { key: 'performance', label: DIMENSION_TEXT.performance, weight: 60 },
   { key: 'ability', label: DIMENSION_TEXT.ability, weight: 20 },
   { key: 'attitude', label: DIMENSION_TEXT.attitude, weight: 20 }
 ]
 
-// KPI 数据（mock）
-const kpiItems = [
-  { name: '销售额完成率', target: '100万', weight: 40, selfScore: 85 },
-  { name: '项目交付准时率', target: '≥95%', weight: 30, selfScore: 90 },
-  { name: '代码质量', target: '无P0缺陷', weight: 30, selfScore: 88 }
-]
+// KPI 数据（从 currentRecord.kpi_snapshot 派生）
+const kpiItems = computed(() => {
+  if (!currentRecord.value || !currentRecord.value.kpi_snapshot) return []
+  const snapshot = currentRecord.value.kpi_snapshot
+  if (Array.isArray(snapshot)) {
+    return snapshot.map((item, index) => ({
+      name: item.name || item.kpi_name || `KPI ${index + 1}`,
+      target: item.target_value || item.target || '-',
+      weight: item.weight || 0,
+      selfScore: item.self_score || null
+    }))
+  }
+  if (typeof snapshot === 'object' && snapshot.items) {
+    return snapshot.items.map((item, index) => ({
+      name: item.name || item.kpi_name || `KPI ${index + 1}`,
+      target: item.target_value || item.target || '-',
+      weight: item.weight || 0,
+      selfScore: item.self_score || null
+    }))
+  }
+  return []
+})
 
 // 表单数据
 const scoreForm = reactive({
-  dimensionScores: {
-    performance: null,
-    ability: null,
-    attitude: null
-  },
-  kpiScores: [null, null, null],
+  dimensionScores: { performance: null, ability: null, attitude: null },
+  kpiScores: [],
   comment: ''
 })
 
 const scoreFormRef = ref(null)
 const submitting = ref(false)
+const savingDraft = ref(false)
 const dimensionErrors = reactive({ performance: '', ability: '', attitude: '' })
 const commentError = ref('')
 
@@ -256,6 +303,82 @@ const diffDialogVisible = ref(false)
 const diffDimension = ref('')
 const diffScore = ref(0)
 const diffSelfScore = ref(0)
+
+// 监听 KPI 项目变化，初始化评分数组
+watch(kpiItems, (items) => {
+  scoreForm.kpiScores = new Array(items.length).fill(null)
+}, { immediate: true })
+
+// 挂载时获取待评列表
+onMounted(async () => {
+  loading.value = true
+  try {
+    const res = await getToReviewList()
+    toReviewList.value = res || []
+    if (toReviewList.value.length > 0) {
+      // 支持通过 query 参数指定 recordId
+      const queryRecordId = route.query.recordId ? parseInt(route.query.recordId) : null
+      const target = queryRecordId
+        ? toReviewList.value.find(r => r.record_id === queryRecordId)
+        : toReviewList.value[0]
+      if (target) {
+        await selectRecord(target.record_id)
+      } else {
+        await selectRecord(toReviewList.value[0].record_id)
+      }
+    }
+  } catch (e) {
+    console.error('获取待评列表失败:', e)
+    ElMessage.error('获取待评列表失败')
+  } finally {
+    loading.value = false
+  }
+})
+
+// 选择被评人
+async function selectRecord(recordId) {
+  selectedRecordId.value = recordId
+  currentRecord.value = toReviewList.value.find(r => r.record_id === recordId)
+  resetScoreForm()
+  await loadDraft(recordId)
+}
+
+function resetScoreForm() {
+  scoreForm.dimensionScores = { performance: null, ability: null, attitude: null }
+  scoreForm.comment = ''
+  dimensionErrors.performance = ''
+  dimensionErrors.ability = ''
+  dimensionErrors.attitude = ''
+  commentError.value = ''
+  // kpiScores 由 watch 自动重置
+}
+
+async function loadDraft(recordId) {
+  try {
+    const res = await getManagerDraft(recordId)
+    if (res.has_draft && res.draft) {
+      const draft = res.draft
+      if (draft.performance !== undefined && draft.performance !== null) {
+        scoreForm.dimensionScores.performance = draft.performance
+      }
+      if (draft.ability !== undefined && draft.ability !== null) {
+        scoreForm.dimensionScores.ability = draft.ability
+      }
+      if (draft.attitude !== undefined && draft.attitude !== null) {
+        scoreForm.dimensionScores.attitude = draft.attitude
+      }
+      if (draft.comment !== undefined && draft.comment !== null) {
+        scoreForm.comment = draft.comment
+      }
+      if (draft.kpi_scores && Array.isArray(draft.kpi_scores)) {
+        scoreForm.kpiScores = draft.kpi_scores.slice(0, kpiItems.value.length)
+      }
+      ElMessage.info('已自动恢复上次保存的草稿')
+    }
+  } catch (e) {
+    console.error('加载草稿失败:', e)
+  }
+}
 
 // 校验维度分数
 function handleDimensionScoreChange(dimKey, val) {
@@ -268,28 +391,29 @@ function handleDimensionScoreChange(dimKey, val) {
 
 // 检查是否可以提交
 const canSubmit = computed(() => {
-  // 所有维度已填写
   const allDimensionsFilled = Object.values(scoreForm.dimensionScores).every(
     s => s !== null && s !== undefined && s >= 0 && s <= 100
   )
   if (!allDimensionsFilled) return false
-
-  // 上级评分时评语不少于20字
   if (mode.value === 'manager') {
     if (!scoreForm.comment || scoreForm.comment.length < 20) return false
   }
-
   return true
 })
 
 // 提交评分
 async function handleSubmit() {
+  if (submitting.value) return
+  if (!selectedRecordId.value) {
+    ElMessage.warning('请选择被评人')
+    return
+  }
   // 检查上级评分差异
   if (mode.value === 'manager') {
     const diffs = []
     for (const dim of dimensions) {
       const managerScore = scoreForm.dimensionScores[dim.key]
-      const selfScore = selfScores[dim.key]
+      const selfScore = selfScores.value[dim.key]
       if (managerScore !== null && selfScore !== null && Math.abs(managerScore - selfScore) > 20) {
         diffs.push({ dim: dim.label, managerScore, selfScore })
       }
@@ -302,7 +426,6 @@ async function handleSubmit() {
       return
     }
   }
-
   await doSubmit()
 }
 
@@ -314,11 +437,33 @@ async function confirmDiffSubmit() {
 async function doSubmit() {
   submitting.value = true
   try {
-    // TODO: 调用 API 提交评分
-    // await submitManagerScore(recordId, scoreForm)
+    const data = {
+      performance: scoreForm.dimensionScores.performance,
+      ability: scoreForm.dimensionScores.ability,
+      attitude: scoreForm.dimensionScores.attitude,
+      kpi_scores: scoreForm.kpiScores,
+      comment: scoreForm.comment
+    }
+    await submitManagerScore(selectedRecordId.value, data)
+    // 提交成功后删除草稿
+    try {
+      await deleteManagerDraft(selectedRecordId.value)
+    } catch (e) {
+      console.warn('删除草稿失败:', e)
+    }
     ElMessage.success('评分提交成功')
+    // 从列表中移除已评记录
+    toReviewList.value = toReviewList.value.filter(r => r.record_id !== selectedRecordId.value)
+    if (toReviewList.value.length > 0) {
+      await selectRecord(toReviewList.value[0].record_id)
+    } else {
+      currentRecord.value = null
+      selectedRecordId.value = null
+      resetScoreForm()
+    }
   } catch (error) {
     console.error('Submit failed:', error)
+    ElMessage.error(error?.response?.data?.message || '评分提交失败')
   } finally {
     submitting.value = false
   }
@@ -326,12 +471,26 @@ async function doSubmit() {
 
 // 保存草稿
 async function handleSaveDraft() {
+  if (!selectedRecordId.value) {
+    ElMessage.warning('请选择被评人')
+    return
+  }
+  savingDraft.value = true
   try {
-    // TODO: 调用 API 保存草稿
-    // await saveDraft(recordId, scoreForm)
+    const data = {
+      performance: scoreForm.dimensionScores.performance,
+      ability: scoreForm.dimensionScores.ability,
+      attitude: scoreForm.dimensionScores.attitude,
+      kpi_scores: scoreForm.kpiScores,
+      comment: scoreForm.comment
+    }
+    await saveManagerDraft(selectedRecordId.value, data)
     ElMessage.success('草稿保存成功')
   } catch (error) {
     console.error('Save draft failed:', error)
+    ElMessage.error(error?.response?.data?.message || '草稿保存失败')
+  } finally {
+    savingDraft.value = false
   }
 }
 </script>
@@ -509,6 +668,14 @@ async function handleSaveDraft() {
   color: #f56c6c;
   font-size: 12px;
   margin-top: 4px;
+}
+
+.no-record-tip {
+  padding: 40px 0;
+}
+
+.record-selector {
+  margin-bottom: 16px;
 }
 
 @media (max-width: 1024px) {

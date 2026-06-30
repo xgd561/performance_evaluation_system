@@ -98,48 +98,64 @@ def hr_user(db_session: Session):
 @pytest.fixture(scope="function")
 def manager_user(db_session: Session):
     """Create a manager user with employee."""
-    dept = Department(name="技术部", code="TECH")
-    db_session.add(dept)
-    db_session.flush()
-    pos = Position(name="技术经理", department_id=dept.id)
-    db_session.add(pos)
-    db_session.flush()
-    emp = Employee(employee_no="MGR001", name="李经理", department_id=dept.id, position_id=pos.id)
-    db_session.add(emp)
-    db_session.flush()
-    user = User(
-        username="mgr001",
-        password_hash=get_password_hash("Mgr001@123"),
-        role="manager",
-        employee_id=emp.id,
-        is_first_login=False,
-    )
-    db_session.add(user)
-    db_session.commit()
+    dept = db_session.query(Department).filter(Department.code == "TECH").first()
+    if not dept:
+        dept = Department(name="技术部", code="TECH")
+        db_session.add(dept)
+        db_session.flush()
+    pos = db_session.query(Position).filter(Position.name == "技术经理", Position.department_id == dept.id).first()
+    if not pos:
+        pos = Position(name="技术经理", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+    emp = db_session.query(Employee).filter(Employee.employee_no == "MGR001").first()
+    if not emp:
+        emp = Employee(employee_no="MGR001", name="李经理", department_id=dept.id, position_id=pos.id)
+        db_session.add(emp)
+        db_session.flush()
+    user = db_session.query(User).filter(User.username == "mgr001").first()
+    if not user:
+        user = User(
+            username="mgr001",
+            password_hash=get_password_hash("Mgr001@123"),
+            role="manager",
+            employee_id=emp.id,
+            is_first_login=False,
+        )
+        db_session.add(user)
+        db_session.commit()
     return user
 
 
 @pytest.fixture(scope="function")
 def employee_user(db_session: Session):
     """Create a regular employee user."""
-    dept = Department(name="技术部", code="TECH")
-    db_session.add(dept)
-    db_session.flush()
-    pos = Position(name="Java工程师", department_id=dept.id)
-    db_session.add(pos)
-    db_session.flush()
-    emp = Employee(employee_no="EMP001", name="王员工", department_id=dept.id, position_id=pos.id)
-    db_session.add(emp)
-    db_session.flush()
-    user = User(
-        username="emp001",
-        password_hash=get_password_hash("Emp001@123"),
-        role="employee",
-        employee_id=emp.id,
-        is_first_login=True,
-    )
-    db_session.add(user)
-    db_session.commit()
+    dept = db_session.query(Department).filter(Department.code == "TECH").first()
+    if not dept:
+        dept = Department(name="技术部", code="TECH")
+        db_session.add(dept)
+        db_session.flush()
+    pos = db_session.query(Position).filter(Position.name == "Java工程师", Position.department_id == dept.id).first()
+    if not pos:
+        pos = Position(name="Java工程师", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+    emp = db_session.query(Employee).filter(Employee.employee_no == "EMP001").first()
+    if not emp:
+        emp = Employee(employee_no="EMP001", name="王员工", department_id=dept.id, position_id=pos.id)
+        db_session.add(emp)
+        db_session.flush()
+    user = db_session.query(User).filter(User.username == "emp001").first()
+    if not user:
+        user = User(
+            username="emp001",
+            password_hash=get_password_hash("Emp001@123"),
+            role="employee",
+            employee_id=emp.id,
+            is_first_login=True,
+        )
+        db_session.add(user)
+        db_session.commit()
     return user
 
 
@@ -171,5 +187,69 @@ def manager_token(client: TestClient, manager_user):
 def employee_token(client: TestClient, employee_user):
     """Get employee access token."""
     resp = client.post("/auth/login", json={"username": "emp001", "password": "Emp001@123"})
+    assert resp.status_code == 200
+    return resp.json()["access_token"]
+
+
+@pytest.fixture(scope="function")
+def executive_user(db_session: Session):
+    """Create an executive user with employee."""
+    dept = Department(name="高管部", code="EXEC")
+    db_session.add(dept)
+    db_session.flush()
+    pos = Position(name="高管", department_id=dept.id)
+    db_session.add(pos)
+    db_session.flush()
+    emp = Employee(employee_no="EXEC001", name="赵高管", department_id=dept.id, position_id=pos.id)
+    db_session.add(emp)
+    db_session.flush()
+    user = User(
+        username="exec001",
+        password_hash=get_password_hash("Exec001@123"),
+        role="executive",
+        employee_id=emp.id,
+        is_first_login=False,
+    )
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+@pytest.fixture(scope="function")
+def executive_token(client: TestClient, executive_user):
+    """Get executive access token."""
+    resp = client.post("/auth/login", json={"username": "exec001", "password": "Exec001@123"})
+    assert resp.status_code == 200
+    return resp.json()["access_token"]
+
+
+@pytest.fixture(scope="function")
+def peer_user(db_session: Session):
+    """Create a peer user with employee."""
+    dept = Department(name="协作部", code="PEER")
+    db_session.add(dept)
+    db_session.flush()
+    pos = Position(name="协作人", department_id=dept.id)
+    db_session.add(pos)
+    db_session.flush()
+    emp = Employee(employee_no="PEER001", name="协作员工", department_id=dept.id, position_id=pos.id)
+    db_session.add(emp)
+    db_session.flush()
+    user = User(
+        username="peer001",
+        password_hash=get_password_hash("Peer001@123"),
+        role="peer",
+        employee_id=emp.id,
+        is_first_login=False,
+    )
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+@pytest.fixture(scope="function")
+def peer_token(client: TestClient, peer_user):
+    """Get peer access token."""
+    resp = client.post("/auth/login", json={"username": "peer001", "password": "Peer001@123"})
     assert resp.status_code == 200
     return resp.json()["access_token"]

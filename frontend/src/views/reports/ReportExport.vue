@@ -12,20 +12,6 @@
           <el-button type="primary" @click="handleExport" :loading="exportLoading" :disabled="!queryForm.cycle_id">导出 Excel</el-button>
         </el-form-item>
       </el-form>
-
-      <el-divider v-if="reportData">预览</el-divider>
-
-      <el-table v-if="reportData" :data="reportData.rows" style="width: 100%" max-height="500">
-        <el-table-column prop="工号" label="工号" width="120" />
-        <el-table-column prop="姓名" label="姓名" width="120" />
-        <el-table-column prop="部门" label="部门" />
-        <el-table-column prop="总分" label="总分" width="100" />
-        <el-table-column prop="等级" label="等级" width="100" />
-        <el-table-column prop="业绩分" label="业绩分" width="100" />
-        <el-table-column prop="能力分" label="能力分" width="100" />
-        <el-table-column prop="态度分" label="态度分" width="100" />
-        <el-table-column prop="是否特批" label="是否特批" width="100" />
-      </el-table>
     </el-card>
   </div>
 </template>
@@ -33,12 +19,11 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { exportCycleReport } from '@/api/reports'
+import { exportCycleReportExcel } from '@/api/reports'
 import { listCycles } from '@/api/cycles'
 
 const exportLoading = ref(false)
 const cycles = ref([])
-const reportData = ref(null)
 
 const queryForm = reactive({
   cycle_id: null,
@@ -60,11 +45,33 @@ async function handleExport() {
   }
   exportLoading.value = true
   try {
-    const res = await exportCycleReport(queryForm.cycle_id)
-    reportData.value = res
-    ElMessage.success(`加载成功，共 ${res.total} 条记录`)
+    const res = await exportCycleReportExcel(queryForm.cycle_id)
+    const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    const contentDisposition = res.headers['content-disposition']
+    let filename = '考核结果.xlsx'
+    if (contentDisposition) {
+      const filenameStar = contentDisposition.match(/filename\*=UTF-8''(.+)/)
+      if (filenameStar && filenameStar[1]) {
+        filename = decodeURIComponent(filenameStar[1])
+      } else {
+        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/)
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1]
+        }
+      }
+    }
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
   } catch (e) {
     console.error(e)
+    ElMessage.error('导出失败')
   } finally {
     exportLoading.value = false
   }

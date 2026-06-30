@@ -150,7 +150,7 @@ def remove_peer_reviewer(
 def list_peer_reviewers(
     cycle_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("admin", "hr")),
+    user: User = Depends(require_role("admin", "hr", "executive")),
 ):
     """获取某周期的协作评分关系列表"""
     relations = db.query(PeerReviewer).filter(PeerReviewer.cycle_id == cycle_id).all()

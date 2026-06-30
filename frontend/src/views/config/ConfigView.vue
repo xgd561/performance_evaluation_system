@@ -26,14 +26,14 @@
       <el-tab-pane label="维度权重" name="weights">
         <el-card>
           <el-form label-width="120px">
-            <el-form-item label="自评权重">
-              <el-input-number v-model="dimensionWeights.self" :min="0" :max="100" :precision="0" />
+            <el-form-item label="工作业绩权重">
+              <el-input-number v-model="dimensionWeights.performance" :min="0" :max="100" :precision="0" />
             </el-form-item>
-            <el-form-item label="上级评权重">
-              <el-input-number v-model="dimensionWeights.manager" :min="0" :max="100" :precision="0" />
+            <el-form-item label="工作能力权重">
+              <el-input-number v-model="dimensionWeights.ability" :min="0" :max="100" :precision="0" />
             </el-form-item>
-            <el-form-item label="协作评权重">
-              <el-input-number v-model="dimensionWeights.peer" :min="0" :max="100" :precision="0" />
+            <el-form-item label="工作态度权重">
+              <el-input-number v-model="dimensionWeights.attitude" :min="0" :max="100" :precision="0" />
             </el-form-item>
             <el-form-item>
               <el-tag :type="weightTotal === 100 ? 'success' : 'danger'">当前合计: {{ weightTotal }}% ({{ weightTotal === 100 ? '正确' : '应为100' }})</el-tag>
@@ -101,11 +101,11 @@ const gradeRules = reactive({
   D: { min: 0, max: 59.9 },
 })
 
-const dimensionWeights = reactive({ self: 30, manager: 50, peer: 20 })
+const dimensionWeights = reactive({ performance: 60, ability: 20, attitude: 20 })
 const reviewerWeights = reactive({ self: 10, manager: 70, peer: 20 })
 const smallDeptExemption = reactive({ threshold: 5, enabled: false })
 
-const weightTotal = computed(() => (dimensionWeights.self || 0) + (dimensionWeights.manager || 0) + (dimensionWeights.peer || 0))
+const weightTotal = computed(() => (dimensionWeights.performance || 0) + (dimensionWeights.ability || 0) + (dimensionWeights.attitude || 0))
 const reviewerTotal = computed(() => (reviewerWeights.self || 0) + (reviewerWeights.manager || 0) + (reviewerWeights.peer || 0))
 
 async function loadAll() {

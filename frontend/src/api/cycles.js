@@ -23,3 +23,7 @@ export function launchCycle(data) {
 export function getCycleProgress(id) {
   return request.get(`/assessment-cycles/${id}/progress`)
 }
+
+export function publishCycle(id) {
+  return request.post(`/assessment-cycles/${id}/publish`)
+}

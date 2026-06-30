@@ -91,6 +91,11 @@ def get_current_user(
 
 def require_role(*roles: str):
     def role_checker(user: User = Depends(get_current_user)) -> User:
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="用户已被禁用",
+            )
         if user.role not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

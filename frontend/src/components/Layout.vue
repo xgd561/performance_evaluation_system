@@ -33,6 +33,10 @@
           <el-icon><Setting /></el-icon>
           <span>系统配置</span>
         </el-menu-item>
+        <el-menu-item v-if="canSee('audit-logs')" index="/audit-logs">
+          <el-icon><Document /></el-icon>
+          <span>操作日志</span>
+        </el-menu-item>
         <el-menu-item v-if="canSee('appeals')" index="/appeals">
           <el-icon><Bell /></el-icon>
           <span>申诉管理</span>
@@ -44,6 +48,18 @@
         <el-menu-item v-if="canSee('reports')" index="/reports">
           <el-icon><Download /></el-icon>
           <span>报表导出</span>
+        </el-menu-item>
+        <el-menu-item v-if="canSee('distribution-review')" index="/distribution-review">
+          <el-icon><ScaleToOriginal /></el-icon>
+          <span>强制分布处理</span>
+        </el-menu-item>
+        <el-menu-item v-if="canSee('kpi-adjustment-request')" index="/kpi-adjustment-request">
+          <el-icon><Edit /></el-icon>
+          <span>KPI调整申请</span>
+        </el-menu-item>
+        <el-menu-item v-if="canSee('kpi-adjustment-approval')" index="/kpi-adjustment-approval">
+          <el-icon><Checked /></el-icon>
+          <span>KPI调整审批</span>
         </el-menu-item>
         <el-menu-item v-if="canSee('score-sheet')" index="/score-sheet">
           <el-icon><Edit /></el-icon>
@@ -106,9 +122,9 @@ const authStore = useAuthStore()
 const role = computed(() => authStore.user?.role || '')
 
 const menuPermissions = {
-  'admin': ['employees', 'departments', 'cycles', 'kpi-templates', 'config', 'appeals', 'summary', 'reports', 'score-sheet', 'approval-workbench', 'interviews', 'peer-review'],
-  'hr': ['employees', 'cycles', 'appeals', 'summary', 'reports'],
-  'manager': ['score-sheet', 'approval-workbench', 'interviews'],
+  'admin': ['employees', 'departments', 'cycles', 'kpi-templates', 'config', 'appeals', 'summary', 'reports', 'score-sheet', 'approval-workbench', 'interviews', 'peer-review', 'kpi-adjustment-approval', 'audit-logs'],
+  'hr': ['employees', 'cycles', 'appeals', 'summary', 'reports', 'distribution-review', 'kpi-adjustment-approval', 'audit-logs'],
+  'manager': ['score-sheet', 'approval-workbench', 'interviews', 'kpi-adjustment-request'],
   'employee': ['my-performance', 'appeal'],
   'peer': ['peer-review']
 }

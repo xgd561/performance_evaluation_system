@@ -23,6 +23,8 @@ from app.schemas import (
 )
 from app.models import User
 
+from app.services.operation_logger import log_operation
+
 router = APIRouter()
 security = HTTPBearer()
 
@@ -148,6 +150,15 @@ def change_password(
     user.password_hash = get_password_hash(req.new_password)
     user.is_first_login = False
     db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="change_password",
+        target_type="user",
+        target_id=user.id,
+    )
+
     return {"code": 200, "message": "密码修改成功"}
 
 

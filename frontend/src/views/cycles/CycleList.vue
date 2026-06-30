@@ -38,6 +38,7 @@
           <template #default="scope">
             <el-button size="small" v-if="scope.row.status === 'not_started'" @click="editCycle(scope.row)">编辑</el-button>
             <el-button size="small" type="success" v-if="scope.row.status === 'not_started'" @click="openLaunchDialog(scope.row)">发起</el-button>
+            <el-button size="small" type="warning" v-if="canPublish(scope.row.status)" @click="handlePublish(scope.row)">发布结果</el-button>
             <el-button size="small" @click="viewProgress(scope.row)">进度</el-button>
             <el-button size="small" type="danger" v-if="scope.row.status === 'not_started'" @click="removeCycle(scope.row)">删除</el-button>
           </template>
@@ -106,7 +107,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listCycles, createCycle, updateCycle, deleteCycle, launchCycle, getCycleProgress } from '@/api/cycles'
+import { listCycles, createCycle, updateCycle, deleteCycle, launchCycle, getCycleProgress, publishCycle } from '@/api/cycles'
 import { listEmployees } from '@/api/employees'
 
 const loading = ref(false)
@@ -148,6 +149,7 @@ function statusText(status) {
     pending_peer: '协作评中',
     pending_summary: '汇总中',
     pending_approval: '审批中',
+    pending_interview: '待发布',
     published: '已发布',
     archived: '已归档',
   }
@@ -159,8 +161,27 @@ function statusType(status) {
   if (status === 'pending_self') return 'primary'
   if (status === 'pending_manager' || status === 'pending_peer') return 'warning'
   if (status === 'pending_summary' || status === 'pending_approval') return 'warning'
+  if (status === 'pending_interview') return 'warning'
   if (status === 'published' || status === 'archived') return 'success'
   return 'info'
+}
+
+function canPublish(status) {
+  return ['pending_self', 'pending_manager', 'pending_peer', 'pending_summary', 'pending_approval', 'pending_interview'].includes(status)
+}
+
+async function handlePublish(row) {
+  try {
+    await ElMessageBox.confirm(`确认发布考核周期 ${row.name} 的结果？发布后员工将可查看自己的考核结果。`, '提示', { type: 'warning' })
+    await publishCycle(row.id)
+    ElMessage.success('发布成功')
+    loadData()
+  } catch (e) {
+    if (e !== 'cancel') {
+      console.error(e)
+      ElMessage.error(e?.response?.data?.message || '发布失败')
+    }
+  }
 }
 
 async function loadData() {

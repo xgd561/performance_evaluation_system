@@ -79,6 +79,7 @@
             >
               提交自评
             </el-button>
+            <el-button size="large" :loading="savingDraft" @click="handleSaveDraft">保存草稿</el-button>
             <el-button size="large" @click="handleCancel">返回</el-button>
           </div>
         </el-form>
@@ -91,7 +92,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getMyAssessment, submitSelfScore } from '@/api/scores'
+import { getMyAssessment, submitSelfScore, getManagerDraft, saveManagerDraft, deleteManagerDraft } from '@/api/scores'
 import { SCORE_ANCHORS, DIMENSION_TEXT } from '@/utils/constants'
 
 const router = useRouter()
@@ -129,6 +130,7 @@ const scoreForm = reactive({
 
 const scoreFormRef = ref(null)
 const submitting = ref(false)
+const savingDraft = ref(false)
 const dimensionErrors = reactive({ performance: '', ability: '', attitude: '' })
 
 const canSubmit = computed(() => {
@@ -146,6 +148,25 @@ onMounted(async () => {
       assessmentInfo.cycleName = item.cycle_name
       assessmentInfo.deadline = item.self_due_date
       assessmentInfo.recordId = item.record_id
+      // 加载草稿
+      try {
+        const draftRes = await getManagerDraft(item.record_id)
+        if (draftRes.has_draft && draftRes.draft) {
+          const d = draftRes.draft
+          if (d.performance !== undefined && d.performance !== null) {
+            scoreForm.dimensionScores.performance = d.performance
+          }
+          if (d.ability !== undefined && d.ability !== null) {
+            scoreForm.dimensionScores.ability = d.ability
+          }
+          if (d.attitude !== undefined && d.attitude !== null) {
+            scoreForm.dimensionScores.attitude = d.attitude
+          }
+          ElMessage.info('已自动恢复上次保存的草稿')
+        }
+      } catch (e) {
+        console.warn('加载草稿失败:', e)
+      }
     } else {
       ElMessage.info('当前没有待自评的考核')
     }
@@ -191,6 +212,12 @@ async function handleSubmit() {
       attitude: scoreForm.dimensionScores.attitude,
     })
     ElMessage.success('自评提交成功')
+    // 提交成功后删除草稿
+    try {
+      await deleteManagerDraft(assessmentInfo.recordId)
+    } catch (e) {
+      console.warn('删除草稿失败:', e)
+    }
     router.push('/my-performance')
   } catch (error) {
     console.error('Submit failed:', error)
@@ -202,6 +229,27 @@ async function handleSubmit() {
 
 function handleCancel() {
   router.push('/my-performance')
+}
+
+async function handleSaveDraft() {
+  if (!assessmentInfo.recordId) {
+    ElMessage.warning('没有可保存的考核记录')
+    return
+  }
+  savingDraft.value = true
+  try {
+    await saveManagerDraft(assessmentInfo.recordId, {
+      performance: scoreForm.dimensionScores.performance,
+      ability: scoreForm.dimensionScores.ability,
+      attitude: scoreForm.dimensionScores.attitude,
+    })
+    ElMessage.success('草稿保存成功')
+  } catch (error) {
+    console.error('Save draft failed:', error)
+    ElMessage.error(error?.response?.data?.message || '草稿保存失败')
+  } finally {
+    savingDraft.value = false
+  }
 }
 </script>
 

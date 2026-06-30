@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from app.database import init_db
-from app.routers import auth, employees, departments, cycles, kpi_templates, config, dashboard, appeals, scores, reports, approvals, interviews, peers
+from app.routers import auth, employees, departments, cycles, kpi_templates, config, dashboard, appeals, scores, reports, approvals, interviews, peers, logs
 import app.models
 
 app = FastAPI(
@@ -54,6 +54,7 @@ api_v1.include_router(approvals.router, prefix="/approvals", tags=["审批管理
 api_v1.include_router(interviews.router, prefix="/interviews", tags=["绩效面谈"])
 api_v1.include_router(reports.router, prefix="/reports", tags=["报表分析"])
 api_v1.include_router(peers.router, prefix="/peer-reviewers", tags=["协作评分"])
+api_v1.include_router(logs.router, prefix="/logs", tags=["操作日志"])
 
 app.include_router(api_v1)
 
@@ -73,13 +74,38 @@ direct_api.include_router(approvals.router, prefix="/approvals", tags=["审批�
 direct_api.include_router(interviews.router, prefix="/interviews", tags=["绩效面谈"])
 direct_api.include_router(reports.router, prefix="/reports", tags=["报表分析"])
 direct_api.include_router(peers.router, prefix="/peer-reviewers", tags=["协作评分"])
+direct_api.include_router(logs.router, prefix="/logs", tags=["操作日志"])
 
 app.include_router(direct_api)
+
+
+def _migrate_db():
+    """SQLite 简单迁移：为已有表添加新列（如果不存在）"""
+    from sqlalchemy import inspect, text
+    from app.database import engine
+    inspector = inspect(engine)
+    columns = [c['name'] for c in inspector.get_columns('assessment_records')]
+    if 'manager_draft_scores' not in columns:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE assessment_records ADD COLUMN manager_draft_scores TEXT"))
+            conn.commit()
+            print("[migrate] Added column manager_draft_scores to assessment_records")
+    if 'self_draft_scores' not in columns:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE assessment_records ADD COLUMN self_draft_scores TEXT"))
+            conn.commit()
+            print("[migrate] Added column self_draft_scores to assessment_records")
+    if 'peer_draft_scores' not in columns:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE assessment_records ADD COLUMN peer_draft_scores TEXT"))
+            conn.commit()
+            print("[migrate] Added column peer_draft_scores to assessment_records")
 
 
 @app.on_event("startup")
 async def startup_event():
     init_db()
+    _migrate_db()
     # Seed default admin user if not exists
     from sqlalchemy.orm import Session
     from app.database import SessionLocal

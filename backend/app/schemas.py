@@ -256,6 +256,45 @@ class AddEmployeesToCycleRequest(BaseModel):
     cycle_id: int
     employee_ids: List[int]
 
+
+class CycleEmployeeOut(BaseModel):
+    id: int
+    cycle_id: int
+    employee_id: int
+    employee_no: str
+    name: str
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
+    position_id: Optional[int] = None
+    position_name: Optional[str] = None
+    status: str
+    added_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ------------------ Operation Log ------------------
+class OperationLogOut(BaseModel):
+    id: int
+    user_id: int
+    username: Optional[str] = None
+    action: str
+    target_type: Optional[str] = None
+    target_id: Optional[int] = None
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
+    ip_address: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class OperationLogListResponse(BaseModel):
+    total: int
+    items: List[OperationLogOut]
+
+
 # ------------------ Assessment Record ------------------
 class AssessmentRecordOut(BaseModel):
     id: int

@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
+import json
 
 from app.database import get_db
 from app.auth import get_current_user, require_role
-from app.models import KpiTemplate, KpiAdjustment, AssessmentRecord
+from app.models import KpiTemplate, KpiAdjustment, AssessmentRecord, Employee
+from app.services.operation_logger import log_operation
 from app.schemas import (
     KpiTemplateCreate,
     KpiTemplateSingleCreate,
@@ -174,8 +176,8 @@ def request_kpi_adjustment(
 
     adj = KpiAdjustment(
         record_id=record_id,
-        original_kpi="",
-        adjusted_kpi="",
+        original_kpi=record.kpi_snapshot or "",
+        adjusted_kpi=json.dumps({"kpi_id": req.kpi_id, "new_target": req.new_target}, ensure_ascii=False),
         reason=req.reason,
         status="pending",
     )
@@ -185,12 +187,30 @@ def request_kpi_adjustment(
     return {"id": adj.id, "status": "待审批", "message": "KPI调整申请已提交"}
 
 
+def _is_manager_of_record(db: Session, user, adj: KpiAdjustment) -> bool:
+    """检查当前用户是否是该调整申请对应员工的直接上级"""
+    if not user.employee_id:
+        return False
+    record = db.query(AssessmentRecord).filter(AssessmentRecord.id == adj.record_id).first()
+    if not record:
+        return False
+    emp = db.query(Employee).filter(Employee.id == record.employee_id).first()
+    if not emp:
+        return False
+    return emp.manager_id == user.employee_id
+
+
 @router.get("/kpi-adjustments/pending")
 def list_pending_kpi_adjustments(
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin", "hr")),
+    user = Depends(require_role("admin", "hr", "executive", "manager")),
 ):
-    adjustments = db.query(KpiAdjustment).filter(KpiAdjustment.status == "pending").all()
+    query = db.query(KpiAdjustment).filter(KpiAdjustment.status == "pending")
+    if user.role == "manager":
+        if not user.employee_id:
+            return []
+        query = query.join(AssessmentRecord, KpiAdjustment.record_id == AssessmentRecord.id).join(Employee, AssessmentRecord.employee_id == Employee.id).filter(Employee.manager_id == user.employee_id)
+    adjustments = query.all()
     return adjustments
 
 
@@ -198,11 +218,58 @@ def list_pending_kpi_adjustments(
 def approve_kpi_adjustment(
     adj_id: int,
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin", "hr")),
+    user = Depends(require_role("admin", "hr", "manager")),
 ):
     adj = db.query(KpiAdjustment).filter(KpiAdjustment.id == adj_id).first()
     if not adj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="调整申请不存在")
+    if user.role == "manager" and not _is_manager_of_record(db, user, adj):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权审批此调整申请")
+
+    record = db.query(AssessmentRecord).filter(AssessmentRecord.id == adj.record_id).first()
+    old_kpi = record.kpi_snapshot if record else None
+
     adj.status = "approved"
+    if record and adj.adjusted_kpi:
+        record.kpi_snapshot = adj.adjusted_kpi
+
     db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="approve_kpi_adjustment",
+        target_type="kpi_adjustment",
+        target_id=adj_id,
+        old_value={"kpi_snapshot": old_kpi},
+        new_value={"kpi_snapshot": record.kpi_snapshot if record else None},
+    )
+
     return {"status": "approved", "message": "KPI调整已通过"}
+
+
+@router.post("/kpi-adjustments/{adj_id}/reject")
+def reject_kpi_adjustment(
+    adj_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr", "manager")),
+):
+    """驳回KPI调整申请"""
+    adj = db.query(KpiAdjustment).filter(KpiAdjustment.id == adj_id).first()
+    if not adj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="调整申请不存在")
+    if user.role == "manager" and not _is_manager_of_record(db, user, adj):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权审批此调整申请")
+
+    adj.status = "rejected"
+    db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="reject_kpi_adjustment",
+        target_type="kpi_adjustment",
+        target_id=adj_id,
+    )
+
+    return {"status": "rejected", "message": "KPI调整已驳回"}

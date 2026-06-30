@@ -6,13 +6,15 @@ from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import AppealRecord, AssessmentRecord, Employee, User
 
+from app.services.operation_logger import log_operation
+
 router = APIRouter()
 
 @router.get("")
 def list_appeals(
     status: Optional[str] = None,
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin", "hr")),
+    user = Depends(require_role("admin", "hr", "executive")),
 ):
     query = db.query(AppealRecord).join(Employee, AppealRecord.employee_id == Employee.id)
     if status:
@@ -66,7 +68,7 @@ def list_my_appeals(
     return result
 def list_pending_appeals(
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin", "hr")),
+    user = Depends(require_role("admin", "hr", "executive")),
 ):
     return list_appeals(status="pending", db=db, user=user)
 
@@ -132,6 +134,16 @@ def create_appeal(
     db.add(appeal)
     db.commit()
     db.refresh(appeal)
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="create_appeal",
+        target_type="appeal_record",
+        target_id=appeal.id,
+        new_value={"record_id": record_id, "reason": reason, "status": "pending"},
+    )
+
     return {
         "id": appeal.id,
         "record_id": appeal.record_id,
@@ -146,15 +158,26 @@ def review_appeal(
     db: Session = Depends(get_db),
     user = Depends(require_role("admin", "hr")),
 ):
+    """复核申诉（支持修改结果）"""
     appeal = db.query(AppealRecord).filter(AppealRecord.id == appeal_id).first()
     if not appeal:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="申诉记录不存在")
 
     action = req.get("action")
     review_result = req.get("review_result")
+    new_total_score = req.get("total_score")
+    new_grade = req.get("grade")
 
     if action not in ("approve", "reject"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="action 必须是 approve 或 reject")
+
+    record = db.query(AssessmentRecord).filter(AssessmentRecord.id == appeal.record_id).first()
+    old_values = {}
+    if record:
+        old_values = {
+            "total_score": str(record.total_score) if record.total_score else None,
+            "grade": record.grade,
+        }
 
     appeal.status = "resolved" if action == "approve" else "rejected"
     appeal.review_result = review_result
@@ -162,8 +185,32 @@ def review_appeal(
     from datetime import datetime
     appeal.resolved_at = datetime.utcnow()
 
+    # 如果复核通过且传入了新分数/等级，更新考核记录
+    if action == "approve" and record:
+        if new_total_score is not None:
+            record.total_score = new_total_score
+        if new_grade is not None:
+            record.grade = new_grade
+
     db.commit()
     db.refresh(appeal)
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="review_appeal",
+        target_type="appeal_record",
+        target_id=appeal_id,
+        old_value=old_values,
+        new_value={
+            "status": appeal.status,
+            "action": action,
+            "review_result": review_result,
+            "total_score": str(record.total_score) if record else None,
+            "grade": record.grade if record else None,
+        },
+    )
+
     return {
         "id": appeal.id,
         "status": appeal.status,
