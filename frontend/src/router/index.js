@@ -13,7 +13,7 @@ const routes = [
     component: () => import('@/components/Layout.vue'),
     redirect: '/dashboard',
     children: [
-      { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/dashboard/DashboardView.vue'), meta: { roles: ['admin', 'hr', 'manager', 'employee', 'peer'] } },
+      { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/dashboard/DashboardView.vue'), meta: { roles: ['admin', 'hr', 'manager', 'employee', 'peer', 'executive'] } },
       { path: 'employees', name: 'Employees', component: () => import('@/views/employees/EmployeeList.vue'), meta: { roles: ['admin', 'hr'] } },
       { path: 'departments', name: 'Departments', component: () => import('@/views/departments/DepartmentList.vue'), meta: { roles: ['admin'] } },
       { path: 'cycles', name: 'Cycles', component: () => import('@/views/cycles/CycleList.vue'), meta: { roles: ['admin', 'hr'] } },

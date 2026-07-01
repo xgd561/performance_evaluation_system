@@ -150,9 +150,10 @@ async function loadAdjustments() {
 }
 
 async function loadOverrides() {
+  if (!queryForm.cycle_id) return
   overrideLoading.value = true
   try {
-    const res = await getDistributionOverrides()
+    const res = await getDistributionOverrides(queryForm.cycle_id)
     overrides.value = res || []
   } catch (e) {
     console.error(e)

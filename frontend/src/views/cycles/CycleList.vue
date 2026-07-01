@@ -271,7 +271,7 @@ async function removeCycle(row) {
 async function openLaunchDialog(row) {
   currentCycleId.value = row.id
   try {
-    const res = await listEmployees({ page: 1, size: 1000 })
+    const res = await listEmployees({ page: 1, size: 100 })
     const items = res.items || []
     employeeOptions.value = items.map(emp => ({ key: emp.id, label: `${emp.name} (${emp.employee_no})` }))
     selectedEmployees.value = []

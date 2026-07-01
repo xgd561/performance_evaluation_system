@@ -17,7 +17,8 @@ request.interceptors.request.use((config) => {
 request.interceptors.response.use(
   (response) => {
     const data = response.data
-    if (data.code !== undefined && data.code !== 200 && data.code !== 201) {
+    // 只将数字类型的 code 视为业务状态码，避免字符串编码（如部门 code）被误判
+    if (typeof data.code === 'number' && data.code !== 200 && data.code !== 201) {
       ElMessage.error(data.message || '请求失败')
       return Promise.reject(new Error(data.message))
     }

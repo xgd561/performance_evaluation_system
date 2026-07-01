@@ -196,18 +196,21 @@ def calculate_scores(
                 "manager": manager_scores.get(dim),
                 "peer": peer_scores.get(dim),
             }
-            rw = reviewer_weights.get(dim, {})
+            rw = reviewer_weights.get(dim, reviewer_weights)
+            if not rw and any(r in reviewer_weights for r in ["self", "manager", "peer"]):
+                rw = reviewer_weights
             total_w = 0
             weighted_sum = 0
             for reviewer, score in scores.items():
                 if score is not None and reviewer in rw:
                     weighted_sum += score * rw[reviewer]
                     total_w += rw[reviewer]
-            if total_w > 0 and total_w < 1.0:
+            if total_w > 0:
                 weighted_sum = weighted_sum / total_w
             weighted_dims[dim] = round(weighted_sum, 1)
 
-        total = sum(weighted_dims.get(d, 0) * dim_weights.get(d, 0) for d in dim_weights)
+        dim_weight_factor = 100.0 if sum(dim_weights.values()) > 1 else 1.0
+        total = sum(weighted_dims.get(d, 0) * (dim_weights.get(d, 0) / dim_weight_factor) for d in dim_weights)
         total = round(total, 1)
 
         r.weighted_performance = weighted_dims.get("performance", 0)

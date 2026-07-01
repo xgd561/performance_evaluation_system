@@ -493,14 +493,18 @@ def request_distribution_override(
 
 @router.get("/distribution-overrides")
 def get_distribution_overrides(
+    cycle_id: Optional[int] = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_role("admin", "hr", "executive")),
 ):
     """获取强制分布特批申请列表"""
-    records = db.query(AssessmentRecord).filter(
+    query = db.query(AssessmentRecord).filter(
         AssessmentRecord.override_reason != None,
         AssessmentRecord.is_distribution_override == False,
-    ).all()
+    )
+    if cycle_id:
+        query = query.filter(AssessmentRecord.cycle_id == cycle_id)
+    records = query.all()
 
     result = []
     for r in records:
