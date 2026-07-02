@@ -136,6 +136,15 @@ async function calculateScoresViaApi(page, token, cycleId) {
   return body
 }
 
+async function advanceToInterviewViaApi(page, token, cycleId) {
+  const res = await page.request.post(`/api/assessment-cycles/${cycleId}/advance-to-interview`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  const body = await res.json()
+  if (!res.ok()) throw new Error(`Advance to interview failed: ${JSON.stringify(body)}`)
+  return body
+}
+
 async function createAppealViaApi(page, token, recordId, reason) {
   const res = await page.request.post('/api/appeals', {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -604,6 +613,357 @@ test.describe('HR 场景', () => {
 
       // Cleanup temp file
       try { fs.unlinkSync(tmpPath) } catch (_) { /* ignore */ }
+    })
+  })
+
+  test.describe.serial('HR P1 覆盖度补充', () => {
+    test('考核周期 CRUD', async ({ page }) => {
+      const adminToken = await getToken(page, 'admin', 'admin123')
+      const cycle = await createCycleViaApi(page, adminToken, `P1-CRUD-${Date.now()}`)
+
+      await hrLogin(page)
+      await page.goto('/cycles')
+
+      // 1. 编辑周期
+      const row = page.locator('table tbody tr').filter({ hasText: cycle.name })
+      await row.getByRole('button', { name: '编辑' }).click()
+      const editDialog = page.locator('.el-dialog').filter({ hasText: '编辑周期' })
+      await expect(editDialog).toBeVisible()
+      const newName = `${cycle.name}-edited`
+      await editDialog.locator('input').first().fill(newName)
+      await editDialog.getByRole('button', { name: '确定' }).click()
+      await expect(page.getByText('更新成功')).toBeVisible()
+      await expect(page.locator('table tbody tr').filter({ hasText: newName })).toBeVisible()
+
+      // 2. 删除周期
+      const editedRow = page.locator('table tbody tr').filter({ hasText: newName })
+      await editedRow.getByRole('button', { name: '删除' }).click()
+      await page.locator('.el-message-box').getByRole('button', { name: 'OK' }).click()
+      await expect(page.getByText('删除成功')).toBeVisible()
+      await expect(page.locator('table tbody tr').filter({ hasText: newName })).toHaveCount(0)
+    })
+
+    test('考核进度查看', async ({ page }) => {
+      const adminToken = await getToken(page, 'admin', 'admin123')
+      const cycle = await createCycleViaApi(page, adminToken, `P1-进度-${Date.now()}`)
+      const employees = await getEmployeesViaApi(page, adminToken)
+      const employee4 = employees.find(e => e.employee_no === 'WANG001')
+      if (!employee4) throw new Error('Employee 4 not found')
+
+      const hrToken = await getToken(page, 'hr001', 'Hr001@123')
+      await launchCycleViaApi(page, hrToken, cycle.id, [employee4.id])
+
+      await hrLogin(page)
+      await page.goto('/cycles')
+
+      const row = page.locator('table tbody tr').filter({ hasText: cycle.name })
+      await row.getByRole('button', { name: '进度' }).click()
+
+      const progressDialog = page.locator('.el-dialog').filter({ hasText: '考核进度' })
+      await expect(progressDialog).toBeVisible({ timeout: 10000 })
+      await expect(progressDialog.locator('.el-progress')).toBeVisible()
+      await expect(progressDialog.locator('.el-timeline')).toBeVisible()
+      await expect(progressDialog.locator('text=总员工')).toBeVisible()
+    })
+
+    test('申诉详情与筛选', async ({ page }) => {
+      test.setTimeout(45000)
+      const adminToken = await getToken(page, 'admin', 'admin123')
+      const cycle = await createCycleViaApi(page, adminToken, `P1-申诉筛选-${Date.now()}`)
+      const employees = await getEmployeesViaApi(page, adminToken)
+      const employee4 = employees.find(e => e.employee_no === 'WANG001')
+      if (!employee4) throw new Error('Employee 4 not found')
+
+      const hrToken = await getToken(page, 'hr001', 'Hr001@123')
+      await launchCycleViaApi(page, hrToken, cycle.id, [employee4.id])
+
+      const summary = await getScoreSummaryViaApi(page, hrToken, cycle.id)
+      const record = summary.find(r => r.employee_id === employee4.id)
+      if (!record) throw new Error('Record not found')
+
+      const empToken = await getToken(page, 'emp001', 'Emp001@123')
+      const ts = Date.now()
+      await createAppealViaApi(page, empToken, record.record_id, `详情测试申诉1-${ts}`)
+      await createAppealViaApi(page, empToken, record.record_id, `详情测试申诉2-${ts}`)
+
+      await hrLogin(page)
+      await page.goto('/appeals')
+
+      // 1. 查看详情
+      const row1 = page.locator('table tbody tr').filter({ hasText: `详情测试申诉1-${ts}` }).first()
+      await row1.getByRole('button', { name: '查看' }).click()
+
+      const detailDialog = page.locator('.el-dialog').filter({ hasText: '申诉详情' })
+      await expect(detailDialog).toBeVisible()
+      await expect(detailDialog.locator('text=申诉人')).toBeVisible()
+      await expect(detailDialog.locator('text=申诉理由')).toBeVisible()
+      await expect(detailDialog.locator('text=考核总分')).toBeVisible()
+      await expect(detailDialog.locator('text=考核等级')).toBeVisible()
+
+      // 关闭详情
+      await detailDialog.locator('.el-dialog__headerbtn').click()
+      await expect(detailDialog).not.toBeVisible()
+
+      // 2. 筛选待处理（默认就是全部，但显式查询）
+      await page.locator('.search-form').locator('.el-select').first().click()
+      await page.getByRole('option', { name: '待处理' }).click()
+      await page.getByRole('button', { name: '查询' }).click()
+      await page.waitForTimeout(300)
+      await expect(page.locator('table tbody tr').filter({ hasText: `详情测试申诉1-${ts}` })).toBeVisible()
+      await expect(page.locator('table tbody tr').filter({ hasText: `详情测试申诉2-${ts}` })).toBeVisible()
+
+      // 3. 通过其中一个，然后筛选已通过
+      await row1.getByRole('button', { name: '通过' }).click()
+      const reviewDialog = page.locator('.el-dialog').filter({ hasText: '通过申诉' })
+      await reviewDialog.locator('textarea').fill('测试通过')
+      await reviewDialog.getByRole('button', { name: '确定' }).click()
+      await expect(page.getByText('已通过申诉')).toBeVisible()
+      await page.waitForTimeout(500)
+      await page.goto('/appeals')
+      await page.waitForLoadState('networkidle')
+
+      // 筛选已通过
+      await page.locator('.search-form').locator('.el-select').first().click()
+      await page.getByRole('option', { name: '已通过' }).click()
+      await page.getByRole('button', { name: '查询' }).click()
+      await page.waitForTimeout(300)
+      await expect(page.locator('table tbody tr').filter({ hasText: `详情测试申诉1-${ts}` })).toBeVisible()
+      await expect(page.locator('table tbody tr').filter({ hasText: `详情测试申诉2-${ts}` })).not.toBeVisible()
+    })
+
+    test('发布考核结果', async ({ page }) => {
+      const adminToken = await getToken(page, 'admin', 'admin123')
+      const cycle = await createCycleViaApi(page, adminToken, `P1-发布-${Date.now()}`)
+      const employees = await getEmployeesViaApi(page, adminToken)
+      const employee4 = employees.find(e => e.employee_no === 'WANG001')
+      const mgr = employees.find(e => e.employee_no === 'MGR001')
+      const peer = employees.find(e => e.employee_no === 'PEER001')
+      if (!employee4 || !mgr || !peer) throw new Error('Required employees not found')
+
+      const hrToken = await getToken(page, 'hr001', 'Hr001@123')
+      await launchCycleViaApi(page, hrToken, cycle.id, [employee4.id])
+
+      const summary = await getScoreSummaryViaApi(page, hrToken, cycle.id)
+      const record = summary.find(r => r.employee_id === employee4.id)
+      if (!record) throw new Error('Record not found')
+
+      const empToken = await getToken(page, 'emp001', 'Emp001@123')
+      await submitSelfScoreViaApi(page, empToken, record.record_id, {
+        performance: 85, ability: 80, attitude: 90
+      })
+
+      const mgrToken = await getToken(page, 'mgr001', 'Mgr001@123')
+      await submitManagerScoreViaApi(page, mgrToken, record.record_id, {
+        performance: 88, ability: 82, attitude: 85
+      })
+
+      await assignPeerReviewerViaApi(page, hrToken, cycle.id, employee4.id, peer.id)
+      const peerToken = await getToken(page, 'peer001', 'Peer001@123')
+      await submitPeerScoreViaApi(page, peerToken, record.record_id, 78)
+
+      await calculateScoresViaApi(page, hrToken, cycle.id)
+      await advanceToInterviewViaApi(page, hrToken, cycle.id)
+
+      await hrLogin(page)
+      await page.goto('/cycles')
+
+      const row = page.locator('table tbody tr').filter({ hasText: cycle.name })
+      await row.getByRole('button', { name: '发布结果' }).click()
+      await page.locator('.el-message-box').getByRole('button', { name: 'OK' }).click()
+      await expect(page.getByText('发布成功')).toBeVisible()
+
+      await page.reload()
+      await page.waitForTimeout(500)
+      const updatedRow = page.locator('table tbody tr').filter({ hasText: cycle.name })
+      await expect(updatedRow.locator('td').nth(7)).toContainText('已发布')
+    })
+
+    test('智能调整预览', async ({ page }) => {
+      const adminToken = await getToken(page, 'admin', 'admin123')
+      const cycle = await createCycleWithRatioLimitsViaApi(page, adminToken, `P1-智能调整-${Date.now()}`)
+      const employees = await getEmployeesViaApi(page, adminToken)
+      const employee4 = employees.find(e => e.employee_no === 'WANG001')
+      const mgr = employees.find(e => e.employee_no === 'MGR001')
+      const peer = employees.find(e => e.employee_no === 'PEER001')
+      if (!employee4 || !mgr || !peer) throw new Error('Required employees not found')
+
+      const hrToken = await getToken(page, 'hr001', 'Hr001@123')
+      await launchCycleViaApi(page, hrToken, cycle.id, [employee4.id])
+
+      const summary = await getScoreSummaryViaApi(page, hrToken, cycle.id)
+      const record = summary.find(r => r.employee_id === employee4.id)
+      if (!record) throw new Error('Record not found')
+
+      const empToken = await getToken(page, 'emp001', 'Emp001@123')
+      await submitSelfScoreViaApi(page, empToken, record.record_id, {
+        performance: 95, ability: 95, attitude: 95
+      })
+
+      const mgrToken = await getToken(page, 'mgr001', 'Mgr001@123')
+      await submitManagerScoreViaApi(page, mgrToken, record.record_id, {
+        performance: 95, ability: 95, attitude: 95
+      })
+
+      await assignPeerReviewerViaApi(page, hrToken, cycle.id, employee4.id, peer.id)
+      const peerToken = await getToken(page, 'peer001', 'Peer001@123')
+      await submitPeerScoreViaApi(page, peerToken, record.record_id, 95)
+
+      await calculateScoresViaApi(page, hrToken, cycle.id)
+
+      await hrLogin(page)
+      await page.goto('/distribution-review')
+      await expect(page).toHaveURL(/.*\/distribution-review/)
+
+      await page.locator('.el-select').first().click()
+      await page.getByRole('option', { name: cycle.name }).click()
+      await page.getByRole('button', { name: '查询' }).click()
+      await page.waitForTimeout(500)
+
+      const adjustmentCard = page.locator('.el-card').filter({ hasText: '智能调整预览' })
+      await expect(adjustmentCard).toBeVisible()
+
+      const adjustmentTable = adjustmentCard.locator('table').last()
+      await expect(adjustmentTable).toBeVisible()
+
+      const adjRow = adjustmentTable.locator('tbody tr').filter({ hasText: String(record.record_id) })
+      await expect(adjRow).toBeVisible()
+      await expect(adjRow.locator('td').nth(4)).toContainText('A')
+      await expect(adjRow.locator('td').nth(5)).toContainText('B')
+    })
+
+    test('新增考核周期', async ({ page }) => {
+      test.setTimeout(60000)
+      await hrLogin(page)
+      await page.goto('/cycles')
+      await page.waitForTimeout(500)
+
+      await page.getByRole('button', { name: '新增周期' }).click()
+      await page.waitForTimeout(800)
+      const dialog = page.locator('.el-dialog').filter({ hasText: '新增周期' })
+      await expect(dialog).toBeVisible()
+
+      const cycleName = `HR-P1-周期-${Date.now()}`
+      await dialog.locator('.el-form-item').filter({ hasText: '名称' }).locator('input').first().fill(cycleName)
+
+      await dialog.locator('.el-form-item').filter({ hasText: '类型' }).locator('.el-select').first().click()
+      await page.waitForTimeout(300)
+      await page.getByRole('option', { name: '月度' }).click()
+
+      const dateFormItem = dialog.locator('.el-form-item').filter({ hasText: '考核时间' })
+      await dateFormItem.click()
+      await page.waitForTimeout(300)
+      await page.getByRole('gridcell', { name: '1' }).first().click()
+      await page.getByRole('gridcell', { name: '31' }).last().click()
+      await page.waitForTimeout(300)
+
+      await dialog.getByRole('button', { name: '确定' }).click()
+      await expect(page.getByText('创建成功')).toBeVisible()
+
+      await page.reload()
+      await page.waitForTimeout(500)
+      await expect(page.locator('table tbody tr').filter({ hasText: cycleName })).toBeVisible()
+    })
+
+    test('查看等级分布', async ({ page }) => {
+      test.setTimeout(60000)
+      const adminToken = await getToken(page, 'admin', 'admin123')
+      const cycle = await createCycleViaApi(page, adminToken, `P1-分布-${Date.now()}`)
+      const employees = await getEmployeesViaApi(page, adminToken)
+      const employee4 = employees.find(e => e.employee_no === 'WANG001')
+      const mgr = employees.find(e => e.employee_no === 'MGR001')
+      const peer = employees.find(e => e.employee_no === 'PEER001')
+      if (!employee4 || !mgr || !peer) throw new Error('Required employees not found')
+
+      const hrToken = await getToken(page, 'hr001', 'Hr001@123')
+      await launchCycleViaApi(page, hrToken, cycle.id, [employee4.id])
+
+      const summary = await getScoreSummaryViaApi(page, hrToken, cycle.id)
+      const record = summary.find(r => r.employee_id === employee4.id)
+      if (!record) throw new Error('Record not found')
+
+      const empToken = await getToken(page, 'emp001', 'Emp001@123')
+      await submitSelfScoreViaApi(page, empToken, record.record_id, {
+        performance: 85, ability: 80, attitude: 90
+      })
+
+      const mgrToken = await getToken(page, 'mgr001', 'Mgr001@123')
+      await submitManagerScoreViaApi(page, mgrToken, record.record_id, {
+        performance: 88, ability: 82, attitude: 85
+      })
+
+      await assignPeerReviewerViaApi(page, hrToken, cycle.id, employee4.id, peer.id)
+      const peerToken = await getToken(page, 'peer001', 'Peer001@123')
+      await submitPeerScoreViaApi(page, peerToken, record.record_id, 78)
+
+      await calculateScoresViaApi(page, hrToken, cycle.id)
+
+      await hrLogin(page)
+      await page.goto('/summary')
+      await expect(page).toHaveURL(/.*\/summary/)
+
+      await page.locator('.el-select').first().click()
+      await page.getByRole('option', { name: cycle.name }).click()
+      await page.getByRole('button', { name: '查询' }).click()
+      await page.waitForTimeout(500)
+
+      await expect(page.getByText('等级分布').first()).toBeVisible()
+      await expect(page.getByText('总人数').first()).toBeVisible()
+      await expect(page.getByText(/B 等级/).first()).toBeVisible()
+    })
+
+    test('员工管理 CRUD', async ({ page }) => {
+      test.setTimeout(60000)
+      await hrLogin(page)
+      await page.goto('/employees')
+      await page.waitForTimeout(500)
+      await expect(page.locator('table').first()).toBeVisible()
+
+      // 1. 新增员工
+      await page.getByRole('button', { name: '新增员工' }).click()
+      await page.waitForTimeout(300)
+      const addDialog = page.locator('.el-dialog').filter({ hasText: '新增员工' })
+      await expect(addDialog).toBeVisible()
+
+      const empNo = `HR-${Date.now()}`
+      const empName = `HR测试-${Date.now()}`
+
+      await addDialog.locator('.el-form-item').filter({ hasText: '工号' }).locator('input').first().fill(empNo)
+      await addDialog.locator('.el-form-item').filter({ hasText: '姓名' }).locator('input').first().fill(empName)
+
+      await addDialog.locator('.el-form-item').filter({ hasText: '部门' }).locator('.el-select').first().click()
+      await page.waitForTimeout(300)
+      await page.getByRole('option', { name: '管理部' }).click()
+
+      await addDialog.locator('.el-form-item').filter({ hasText: '岗位' }).locator('.el-select').first().click()
+      await page.waitForTimeout(300)
+      await page.getByRole('option', { name: '系统管理员' }).click()
+
+      await addDialog.getByRole('button', { name: '确定' }).click()
+      await expect(page.getByText('创建成功')).toBeVisible()
+
+      // 2. 编辑员工
+      await page.locator('.search-form .el-form-item').filter({ hasText: '关键词' }).locator('input').first().fill(empNo)
+      await page.getByRole('button', { name: '查询' }).click()
+      await page.waitForTimeout(300)
+
+      const row = page.locator('table tbody tr').filter({ hasText: empNo })
+      await row.getByRole('button', { name: '编辑' }).click()
+      await page.waitForTimeout(300)
+      const editDialog = page.locator('.el-dialog').filter({ hasText: '编辑员工' })
+      await expect(editDialog).toBeVisible()
+
+      const newName = `HR编辑-${Date.now()}`
+      await editDialog.locator('.el-form-item').filter({ hasText: '姓名' }).locator('input').first().fill(newName)
+      await editDialog.getByRole('button', { name: '确定' }).click()
+      await expect(page.getByText('更新成功')).toBeVisible()
+
+      // 3. 删除员工
+      await page.waitForTimeout(300)
+      const updatedRow = page.locator('table tbody tr').filter({ hasText: newName })
+      await updatedRow.getByRole('button', { name: '删除' }).click()
+      await page.locator('.el-message-box').getByRole('button', { name: 'OK' }).click()
+      await expect(page.getByText('删除成功')).toBeVisible()
+      await expect(page.locator('table tbody tr').filter({ hasText: newName })).toHaveCount(0)
     })
   })
 })

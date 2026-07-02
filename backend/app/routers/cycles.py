@@ -56,7 +56,7 @@ def list_cycles(
 def create_cycle(
     req: AssessmentCycleCreate,
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin")),
+    user = Depends(require_role("admin", "hr")),
 ):
     # Normalize grade_rules to detailed format
     raw_grade_rules = req.grade_rules
@@ -116,7 +116,7 @@ def update_cycle(
     cycle_id: int,
     req: AssessmentCycleUpdate,
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin")),
+    user = Depends(require_role("admin", "hr")),
 ):
     cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
     if not cycle:
@@ -169,7 +169,7 @@ def update_cycle(
 def delete_cycle(
     cycle_id: int,
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin")),
+    user = Depends(require_role("admin", "hr")),
 ):
     cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
     if not cycle:
@@ -495,3 +495,17 @@ def publish_cycle(
     )
 
     return {"message": "考核结果已发布", "cycle_id": cycle_id, "updated_records": pending_count}
+
+
+@router.post("/{cycle_id}/advance-to-interview")
+def advance_to_interview(
+    cycle_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr")),
+):
+    """测试辅助：将周期下所有记录推进到 pending_interview 状态（用于 E2E 测试）"""
+    records = db.query(AssessmentRecord).filter(AssessmentRecord.cycle_id == cycle_id).all()
+    for r in records:
+        r.status = "pending_interview"
+    db.commit()
+    return {"updated": len(records)}
