@@ -197,7 +197,7 @@ const authStore = useAuthStore()
 
 // 模式：self / manager / peer
 const mode = computed(() => {
-  const role = authStore.userInfo?.role
+  const role = authStore.user?.role
   if (role === 'employee') return 'self'
   if (role === 'manager') return 'manager'
   if (role === 'peer') return 'peer'
