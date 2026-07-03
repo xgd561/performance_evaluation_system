@@ -47,3 +47,19 @@ htmlcov/
 # Temporary files
 *.tmp
 *.temp
+
+# Logs
+*.log
+backend/*.log
+frontend/*.log
+
+# Test artifacts
+test-results/
+frontend/test-results/
+backend/test-results/
+frontend/playwright-report/
+
+# Temporary scripts
+backend/_fix_main.py
+backend/test_export.xlsx
+

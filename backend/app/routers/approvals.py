@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -31,6 +31,7 @@ def _get_next_approver_role(db: Session, record: AssessmentRecord, chain: list):
     existing = db.query(ApprovalRecord).filter(
         ApprovalRecord.record_id == record.id,
         ApprovalRecord.approval_type == "normal",
+        ApprovalRecord.action == "approved",
     ).order_by(ApprovalRecord.step_index.desc()).first()
     current_step = existing.step_index if existing else 0
     if current_step < len(chain):
@@ -131,11 +132,14 @@ def get_pending_approvals(
     # 先根据用户身份和审批链角色计算可审批的 record_id 范围，
     # 再用 SQL IN 条件查询，避免一次性加载所有 pending_approval 记录。
     # -----------------------------------------------------------------
-    # 子查询：每条记录已有的 normal 审批的最大 step_index
+    # 子查询：每条记录已有的 normal 审批的最大 step_index（仅限已通过的审批）
     step_counts = db.query(
         ApprovalRecord.record_id,
         func.max(ApprovalRecord.step_index).label("max_step"),
-    ).filter(ApprovalRecord.approval_type == "normal").group_by(ApprovalRecord.record_id).subquery()
+    ).filter(
+        ApprovalRecord.approval_type == "normal",
+        ApprovalRecord.action == "approved",
+    ).group_by(ApprovalRecord.record_id).subquery()
 
     # 预计算用户的关系数据
     subordinate_ids = [e.id for e in current_employee.subordinates] if current_employee.subordinates else []
@@ -232,7 +236,7 @@ def get_pending_approvals(
 @router.post("/{record_id}/approve")
 def approve_record(
     record_id: int,
-    comment: Optional[str] = None,
+    comment: Optional[str] = Body(None, embed=True),
     db: Session = Depends(get_db),
     user: User = Depends(require_role("manager", "hr", "admin")),
 ):
@@ -256,6 +260,7 @@ def approve_record(
     existing = db.query(ApprovalRecord).filter(
         ApprovalRecord.record_id == record_id,
         ApprovalRecord.approval_type == "normal",
+        ApprovalRecord.action == "approved",
     ).order_by(ApprovalRecord.step_index.desc()).first()
     current_step = existing.step_index if existing else 0
 
@@ -296,7 +301,7 @@ def approve_record(
 @router.post("/{record_id}/reject")
 def reject_record(
     record_id: int,
-    reason: str,
+    reason: str = Body(..., embed=True),
     db: Session = Depends(get_db),
     user: User = Depends(require_role("manager", "hr", "admin")),
 ):
@@ -319,6 +324,7 @@ def reject_record(
     existing = db.query(ApprovalRecord).filter(
         ApprovalRecord.record_id == record_id,
         ApprovalRecord.approval_type == "normal",
+        ApprovalRecord.action == "approved",
     ).order_by(ApprovalRecord.step_index.desc()).first()
     current_step = existing.step_index if existing else 0
 
@@ -352,7 +358,7 @@ def reject_record(
 @router.post("/{record_id}/rollback")
 def rollback_record(
     record_id: int,
-    reason: str,
+    reason: str = Body(..., embed=True),
     db: Session = Depends(get_db),
     user: User = Depends(require_role("manager", "hr", "admin")),
 ):
@@ -375,6 +381,7 @@ def rollback_record(
     existing = db.query(ApprovalRecord).filter(
         ApprovalRecord.record_id == record_id,
         ApprovalRecord.approval_type == "normal",
+        ApprovalRecord.action == "approved",
     ).order_by(ApprovalRecord.step_index.desc()).first()
     current_step = existing.step_index if existing else 0
 

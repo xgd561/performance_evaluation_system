@@ -497,6 +497,20 @@ def publish_cycle(
     return {"message": "考核结果已发布", "cycle_id": cycle_id, "updated_records": pending_count}
 
 
+@router.post("/{cycle_id}/advance-to-approval")
+def advance_to_approval(
+    cycle_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr")),
+):
+    """测试辅助：将周期下所有记录推进到 pending_approval 状态（用于 E2E 测试）"""
+    records = db.query(AssessmentRecord).filter(AssessmentRecord.cycle_id == cycle_id).all()
+    for r in records:
+        r.status = "pending_approval"
+    db.commit()
+    return {"updated": len(records)}
+
+
 @router.post("/{cycle_id}/advance-to-interview")
 def advance_to_interview(
     cycle_id: int,
