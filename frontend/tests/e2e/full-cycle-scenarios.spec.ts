@@ -454,8 +454,8 @@ test.describe.serial('完整绩效考核 Happy Path', () => {
     if (hasRecords) {
       // 点击通过
       await page.locator('button').filter({ hasText: '通过' }).first().click()
-      // 确认对话框
-      await page.locator('.el-message-box').getByRole('button', { name: '确定' }).click()
+      // 确认对话框（Element Plus 在部分场景下显示 OK 而非 确定）
+      await page.locator('.el-message-box').getByRole('button', { name: 'OK' }).click()
       // 断言成功
       await expect(page.getByText('审批通过')).toBeVisible()
     } else {
@@ -636,7 +636,7 @@ test.describe.serial('申诉闭环 Full Cycle', () => {
     const reviewDialog = page.locator('.el-dialog').filter({ hasText: '通过申诉' })
     await expect(reviewDialog).toBeVisible()
     await reviewDialog.locator('textarea').fill('经复核，申诉理由成立，维持原结果。')
-    await reviewDialog.getByRole('button', { name: '确定' }).click()
+    await reviewDialog.getByRole('button', { name: 'OK' }).click()
 
     // 断言成功
     await expect(page.getByText('已通过申诉')).toBeVisible()

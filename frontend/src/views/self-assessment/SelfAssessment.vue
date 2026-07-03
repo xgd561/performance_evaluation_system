@@ -27,7 +27,37 @@
 
       <!-- 右侧：评分区域 -->
       <div class="score-area">
-        <el-form ref="scoreFormRef" :model="scoreForm" label-position="top">
+        <!-- 已提交自评展示 -->
+        <div v-if="hasSubmitted" class="submitted-section">
+          <el-result icon="success" title="自评已提交" sub-title="您已完成当前考核周期的自评">
+            <template #extra>
+              <el-button type="primary" @click="goToMyPerformance">查看我的绩效</el-button>
+            </template>
+          </el-result>
+
+          <div class="submitted-scores">
+            <h4>已提交的自评分数</h4>
+            <div class="dimension-list">
+              <div
+                v-for="dim in dimensions"
+                :key="dim.key"
+                class="dimension-item submitted"
+              >
+                <div class="dim-header">
+                  <span class="dim-name">{{ dim.label }}</span>
+                  <span class="dim-weight">权重 {{ dim.weight }}%</span>
+                </div>
+                <div class="score-display">
+                  <span class="score-value">{{ submittedScores[dim.key] ?? '-' }}</span>
+                  <span class="score-unit">分</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 自评表单 -->
+        <el-form v-else ref="scoreFormRef" :model="scoreForm" label-position="top">
           <div class="dimension-section">
             <h4>维度自评</h4>
             <div class="dimension-list">
@@ -103,6 +133,13 @@ const assessmentInfo = reactive({
   recordId: null,
 })
 
+const hasSubmitted = ref(false)
+const submittedScores = reactive({
+  performance: null,
+  ability: null,
+  attitude: null,
+})
+
 const countdownDays = computed(() => {
   if (!assessmentInfo.deadline) return 1
   const diff = new Date(assessmentInfo.deadline) - Date.now()
@@ -110,8 +147,9 @@ const countdownDays = computed(() => {
 })
 const countdownText = computed(() => {
   if (!assessmentInfo.deadline) return '-'
-  if (countdownDays.value <= 0) return '已截止'
-  return `${countdownDays.value} 天`
+  const dateStr = assessmentInfo.deadline.substring(0, 10)
+  if (countdownDays.value <= 0) return `${dateStr}（已截止）`
+  return `${dateStr}（还剩 ${countdownDays.value} 天）`
 })
 
 const dimensions = [
@@ -143,14 +181,16 @@ onMounted(async () => {
   try {
     const res = await getMyAssessment()
     const items = res?.items || []
-    const item = items.find(i => i.status === 'pending_self')
-    if (item) {
-      assessmentInfo.cycleName = item.cycle_name
-      assessmentInfo.deadline = item.self_due_date
-      assessmentInfo.recordId = item.record_id
+    // 优先查找待自评记录
+    const pendingItem = items.find(i => i.status === 'pending_self')
+    if (pendingItem) {
+      assessmentInfo.cycleName = pendingItem.cycle_name
+      assessmentInfo.deadline = pendingItem.self_due_date
+      assessmentInfo.recordId = pendingItem.record_id
+      hasSubmitted.value = false
       // 加载草稿
       try {
-        const draftRes = await getManagerDraft(item.record_id)
+        const draftRes = await getManagerDraft(pendingItem.record_id)
         if (draftRes.has_draft && draftRes.draft) {
           const d = draftRes.draft
           if (d.performance !== undefined && d.performance !== null) {
@@ -168,7 +208,19 @@ onMounted(async () => {
         console.warn('加载草稿失败:', e)
       }
     } else {
-      ElMessage.info('当前没有待自评的考核')
+      // 查找已提交自评的记录（pending_manager 或更后状态）
+      const submittedItem = items.find(i => i.status !== 'pending_self' && i.self_scores && Object.keys(i.self_scores).length > 0)
+      if (submittedItem) {
+        assessmentInfo.cycleName = submittedItem.cycle_name
+        assessmentInfo.deadline = submittedItem.self_due_date
+        assessmentInfo.recordId = submittedItem.record_id
+        hasSubmitted.value = true
+        submittedScores.performance = submittedItem.self_scores?.performance ?? null
+        submittedScores.ability = submittedItem.self_scores?.ability ?? null
+        submittedScores.attitude = submittedItem.self_scores?.attitude ?? null
+      } else {
+        ElMessage.info('当前没有待自评的考核')
+      }
     }
   } catch (e) {
     console.error(e)
@@ -228,6 +280,10 @@ async function handleSubmit() {
 }
 
 function handleCancel() {
+  router.push('/my-performance')
+}
+
+function goToMyPerformance() {
   router.push('/my-performance')
 }
 
@@ -398,6 +454,43 @@ async function handleSaveDraft() {
   color: #f56c6c;
   font-size: 12px;
   margin-top: 4px;
+}
+
+.submitted-section {
+  padding: 24px;
+}
+
+.submitted-scores {
+  margin-top: 24px;
+}
+
+.submitted-scores h4 {
+  margin: 0 0 16px;
+  font-size: 16px;
+  color: #303133;
+}
+
+.dimension-item.submitted {
+  background: #f0f9ff;
+  border-color: #409eff;
+}
+
+.score-display {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.score-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #409eff;
+}
+
+.score-unit {
+  font-size: 14px;
+  color: #606266;
 }
 
 @media (max-width: 1024px) {

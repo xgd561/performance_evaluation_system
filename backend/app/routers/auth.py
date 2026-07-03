@@ -86,6 +86,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
             "username": user.username,
             "role": user.role,
             "name": user.employee.name if user.employee else user.username,
+            "employee_id": user.employee_id,
         },
     }
     return result

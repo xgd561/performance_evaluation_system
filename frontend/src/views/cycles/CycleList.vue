@@ -34,10 +34,11 @@
             <el-tag :type="statusType(scope.row.status)">{{ statusText(scope.row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220">
+        <el-table-column label="操作" width="280">
           <template #default="scope">
             <el-button size="small" v-if="scope.row.status === 'not_started'" @click="editCycle(scope.row)">编辑</el-button>
             <el-button size="small" type="success" v-if="scope.row.status === 'not_started'" @click="openLaunchDialog(scope.row)">发起</el-button>
+            <el-button size="small" type="primary" v-if="scope.row.status !== 'archived'" @click="openPeerDialog(scope.row)">协作人</el-button>
             <el-button size="small" type="warning" v-if="canPublish(scope.row.status)" @click="handlePublish(scope.row)">发布结果</el-button>
             <el-button size="small" @click="viewProgress(scope.row)">进度</el-button>
             <el-button size="small" type="danger" v-if="scope.row.status === 'not_started'" @click="removeCycle(scope.row)">删除</el-button>
@@ -101,14 +102,64 @@
         </el-timeline>
       </div>
     </el-dialog>
+
+    <!-- Peer Reviewer Dialog -->
+    <el-dialog v-model="peerDialogVisible" :title="`分配协作人 - ${peerCycleName}`" width="750px">
+      <div v-if="peerLoading" class="loading-wrap">
+        <el-skeleton :rows="6" animated />
+      </div>
+      <div v-else>
+        <el-alert type="info" :closable="false" show-icon class="mb-12">
+          <template #title>为每个参与员工选择协作评分人，协作人可查看该员工的自评和上级评分并进行协作评价。</template>
+        </el-alert>
+        <el-table :data="cycleEmployees" style="width: 100%" size="small">
+          <el-table-column prop="name" label="员工" width="100" />
+          <el-table-column prop="department_name" label="部门" width="120" />
+          <el-table-column label="已分配协作人" min-width="180">
+            <template #default="{ row }">
+              <div class="peer-tags">
+                <el-tag
+                  v-for="p in getEmployeePeers(row.employee_id)"
+                  :key="p.id"
+                  closable
+                  @close="handleRemovePeer(p.id)"
+                  type="success"
+                  size="small"
+                  class="peer-tag"
+                >
+                  {{ p.peer_name }}
+                </el-tag>
+                <span v-if="getEmployeePeers(row.employee_id).length === 0" class="empty-text">未分配</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="添加协作人" width="220">
+            <template #default="{ row }">
+              <div class="add-peer-row">
+                <el-select v-model="row._selectedPeer" size="small" placeholder="选择" style="width: 140px" clearable filterable>
+                  <el-option
+                    v-for="opt in getAvailablePeers(row.employee_id)"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+                <el-button size="small" type="primary" @click="handleAddPeer(row)">添加</el-button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listCycles, createCycle, updateCycle, deleteCycle, launchCycle, getCycleProgress, publishCycle } from '@/api/cycles'
+import { listCycles, createCycle, updateCycle, deleteCycle, launchCycle, getCycleProgress, publishCycle, listCycleEmployees } from '@/api/cycles'
 import { listEmployees } from '@/api/employees'
+import { listPeersByCycle, assignPeer, removePeer } from '@/api/peers'
 
 const loading = ref(false)
 const cycles = ref([])
@@ -140,6 +191,15 @@ const currentCycleId = ref(null)
 
 const progressDialogVisible = ref(false)
 const progress = ref(null)
+
+// 协作人分配
+const peerDialogVisible = ref(false)
+const peerLoading = ref(false)
+const peerCycleId = ref(null)
+const peerCycleName = ref('')
+const cycleEmployees = ref([])
+const peerRelations = ref([])
+const peerEmployeeOptions = ref([])
 
 function statusText(status) {
   const map = {
@@ -309,6 +369,71 @@ async function viewProgress(row) {
   }
 }
 
+// 协作人分配
+async function openPeerDialog(row) {
+  peerCycleId.value = row.id
+  peerCycleName.value = row.name
+  peerDialogVisible.value = true
+  await loadPeerData()
+}
+
+async function loadPeerData() {
+  peerLoading.value = true
+  try {
+    const [empRes, peerRes, allEmpRes] = await Promise.all([
+      listCycleEmployees(peerCycleId.value),
+      listPeersByCycle(peerCycleId.value),
+      listEmployees({ page: 1, size: 100 }),
+    ])
+    cycleEmployees.value = (empRes || []).map(emp => ({ ...emp, _selectedPeer: null }))
+    peerRelations.value = peerRes || []
+    const items = allEmpRes.items || []
+    peerEmployeeOptions.value = items.map(emp => ({ value: emp.id, label: `${emp.name} (${emp.employee_no})` }))
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('加载协作人数据失败')
+  } finally {
+    peerLoading.value = false
+  }
+}
+
+function getEmployeePeers(employeeId) {
+  return peerRelations.value.filter(p => p.employee_id === employeeId)
+}
+
+function getAvailablePeers(employeeId) {
+  const existingPeerIds = new Set(getEmployeePeers(employeeId).map(p => p.peer_id))
+  return peerEmployeeOptions.value.filter(opt => opt.value !== employeeId && !existingPeerIds.has(opt.value))
+}
+
+async function handleAddPeer(employee) {
+  const peerId = employee._selectedPeer
+  if (!peerId) {
+    ElMessage.warning('请选择协作人')
+    return
+  }
+  try {
+    await assignPeer({ cycle_id: peerCycleId.value, employee_id: employee.employee_id, peer_id: peerId })
+    ElMessage.success('分配成功')
+    employee._selectedPeer = null
+    await loadPeerData()
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.message || '分配失败')
+  }
+}
+
+async function handleRemovePeer(relationId) {
+  try {
+    await ElMessageBox.confirm('确认移除该协作人？', '提示', { type: 'warning' })
+    await removePeer(relationId)
+    ElMessage.success('移除成功')
+    await loadPeerData()
+  } catch (e) {
+    if (e !== 'cancel') console.error(e)
+  }
+}
+
 onMounted(() => {
   loadData()
 })
@@ -320,5 +445,29 @@ onMounted(() => {
 }
 .toolbar {
   margin-bottom: 16px;
+}
+.loading-wrap {
+  padding: 24px;
+}
+.mb-12 {
+  margin-bottom: 12px;
+}
+.peer-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.peer-tag {
+  margin-right: 0;
+}
+.empty-text {
+  color: #909399;
+  font-size: 12px;
+}
+.add-peer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

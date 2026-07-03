@@ -483,9 +483,10 @@ def get_my_assessment(
     for r in records:
         cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == r.cycle_id).first()
         # P1-18: 员工只能查看已发布/已归档的考核结果
+        # 但员工始终有权查看自己提交的自评分数（self_scores），只隐藏上级/协作评和最终分数
         is_published = r.status in ["published", "archived"]
+        self_scores = json.loads(r.self_scores) if r.self_scores else {}
         if user.role == "employee" and not is_published:
-            self_scores = {}
             manager_scores = {}
             peer_scores = {}
             weighted_performance = None
@@ -496,7 +497,6 @@ def get_my_assessment(
             original_grade = None
             manager_comment = None
         else:
-            self_scores = json.loads(r.self_scores) if r.self_scores else {}
             manager_scores = json.loads(r.manager_scores) if r.manager_scores else {}
             peer_scores = json.loads(r.peer_scores) if r.peer_scores else {}
             weighted_performance = str(r.weighted_performance) if r.weighted_performance else None

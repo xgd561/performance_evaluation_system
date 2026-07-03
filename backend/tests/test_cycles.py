@@ -359,6 +359,12 @@ class TestCycleProgress:
         db_session.flush()
         ce = CycleEmployee(cycle_id=cycle.id, employee_id=emp.id)
         db_session.add(ce)
+        # BUG 修复：必须创建 AssessmentRecord 才能反映真实进度
+        record = AssessmentRecord(
+            cycle_id=cycle.id, employee_id=emp.id, status="pending_self",
+            department_id=dept.id, position_id=pos.id,
+        )
+        db_session.add(record)
         db_session.commit()
         db_session.refresh(cycle)
 
@@ -369,6 +375,49 @@ class TestCycleProgress:
         assert data["total_employees"] == 1
         assert "stages" in data
         assert "overall_progress" in data
+
+        # 核心断言：HR 刚发起考核，员工未自评，自评阶段应为 pending，而非 completed
+        stage_map = {s["name"]: s["status"] for s in data["stages"]}
+        assert stage_map["自评"] == "pending", f"自评阶段应显示 pending，实际为 {stage_map['自评']}"
+        assert stage_map["上级评"] == "pending", f"上级评阶段应显示 pending，实际为 {stage_map['上级评']}"
+        assert stage_map["协作评"] == "pending", f"协作评阶段应显示 pending，实际为 {stage_map['协作评']}"
+        assert stage_map["汇总"] == "pending", f"汇总阶段应显示 pending，实际为 {stage_map['汇总']}"
+        assert stage_map["审批"] == "pending", f"审批阶段应显示 pending，实际为 {stage_map['审批']}"
+
+    def test_cycle_progress_in_progress(self, client: TestClient, admin_token, db_session):
+        """自评进行中：部分员工已提交，部分未提交"""
+        cycle = AssessmentCycle(
+            name="进度周期进行中", type="monthly", start_date=date.today(), end_date=date.today() + timedelta(days=30),
+            status="pending_self"
+        )
+        db_session.add(cycle)
+        db_session.flush()
+        dept = Department(name="测试部", code="TEST")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="测试岗", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+        emp1 = Employee(employee_no="PROG001", name="员工A", department_id=dept.id, position_id=pos.id)
+        emp2 = Employee(employee_no="PROG002", name="员工B", department_id=dept.id, position_id=pos.id)
+        db_session.add(emp1)
+        db_session.add(emp2)
+        db_session.flush()
+        db_session.add(CycleEmployee(cycle_id=cycle.id, employee_id=emp1.id))
+        db_session.add(CycleEmployee(cycle_id=cycle.id, employee_id=emp2.id))
+        db_session.add(AssessmentRecord(cycle_id=cycle.id, employee_id=emp1.id, status="pending_self", department_id=dept.id, position_id=pos.id))
+        db_session.add(AssessmentRecord(cycle_id=cycle.id, employee_id=emp2.id, status="pending_manager", department_id=dept.id, position_id=pos.id))
+        db_session.commit()
+
+        resp = client.get(f"/assessment-cycles/{cycle.id}/progress", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        stage_map = {s["name"]: s["status"] for s in data["stages"]}
+        assert stage_map["自评"] == "in_progress", f"自评应显示 in_progress，实际为 {stage_map['自评']}"
+        assert stage_map["上级评"] == "in_progress", f"上级评应显示 in_progress，实际为 {stage_map['上级评']}"
+        assert stage_map["协作评"] == "pending", f"协作评应显示 pending，实际为 {stage_map['协作评']}"
+        assert stage_map["汇总"] == "pending", f"汇总应显示 pending，实际为 {stage_map['汇总']}"
+        assert stage_map["审批"] == "pending", f"审批应显示 pending，实际为 {stage_map['审批']}"
 
     def test_cycle_progress_not_found(self, client: TestClient, admin_token):
         resp = client.get("/assessment-cycles/99999/progress", headers={"Authorization": f"Bearer {admin_token}"})

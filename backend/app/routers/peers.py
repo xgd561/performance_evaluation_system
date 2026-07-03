@@ -21,10 +21,9 @@ def get_my_peer_reviews(
     if not current_employee:
         return {"items": [], "total": 0}
 
-    # 查询当前员工作为协作评分人的关系
+    # 查询当前员工作为协作评分人的关系（返回所有状态：待办 + 已完成）
     peer_relations = db.query(PeerReviewer).filter(
         PeerReviewer.reviewer_id == current_employee.id,
-        PeerReviewer.status.in_(["pending", "in_progress"])
     ).all()
 
     result = []
@@ -48,6 +47,7 @@ def get_my_peer_reviews(
 
         self_scores = json.loads(record.self_scores) if record.self_scores else {}
         manager_scores = json.loads(record.manager_scores) if record.manager_scores else {}
+        peer_scores = json.loads(record.peer_scores) if record.peer_scores else {}
 
         result.append({
             "id": rel.id,
@@ -60,10 +60,14 @@ def get_my_peer_reviews(
             "department_name": dept.name if dept else None,
             "position_name": pos.name if pos else None,
             "status": record.status,
+            "peer_relation_status": rel.status,
             "self_scores": self_scores,
             "manager_scores": manager_scores,
+            "peer_scores": peer_scores,
             "peer_due_date": str(cycle.peer_due_date) if cycle and cycle.peer_due_date else None,
         })
+
+    result.sort(key=lambda x: (0 if x["peer_relation_status"] != "completed" else 1, x["peer_due_date"] or ""))
 
     return {"items": result, "total": len(result)}
 

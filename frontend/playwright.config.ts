@@ -11,6 +11,9 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/e2e',
 
+  /* 测试超时：60 秒（配合 slowMo 模式） */
+  timeout: 60 * 1000,
+
   /* 并行运行测试文件 */
   fullyParallel: true,
 
@@ -38,6 +41,11 @@ export default defineConfig({
 
     /* 失败时录制视频 */
     video: 'on-first-retry',
+
+    /* 慢动作模式：每个操作延迟 800ms，方便观察 */
+    launchOptions: {
+      slowMo: 800,
+    },
   },
 
   /* 项目配置 */

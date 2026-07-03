@@ -35,6 +35,15 @@
         <div class="status-actions" v-if="currentRecord.status === 'pending_self'">
           <el-button type="primary" @click="goSelfAssessment">进入自评</el-button>
         </div>
+        <div v-else-if="currentRecord.self_scores && Object.keys(currentRecord.self_scores).length > 0" class="self-scores-display">
+          <el-divider />
+          <h4>已提交的自评分数</h4>
+          <div class="score-tags">
+            <el-tag size="large" type="primary">业绩 {{ currentRecord.self_scores.performance ?? '-' }} 分</el-tag>
+            <el-tag size="large" type="success">能力 {{ currentRecord.self_scores.ability ?? '-' }} 分</el-tag>
+            <el-tag size="large" type="warning">态度 {{ currentRecord.self_scores.attitude ?? '-' }} 分</el-tag>
+          </div>
+        </div>
       </el-card>
 
       <!-- 历史趋势图 -->
@@ -507,5 +516,27 @@ function goAppeal(row) {
 .detail-actions {
   margin-top: 24px;
   text-align: center;
+}
+
+.status-actions {
+  margin-top: 16px;
+  text-align: center;
+}
+
+.self-scores-display {
+  margin-top: 16px;
+}
+
+.self-scores-display h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #303133;
+}
+
+.score-tags {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
 }
 </style>

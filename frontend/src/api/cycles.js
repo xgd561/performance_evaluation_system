@@ -27,3 +27,7 @@ export function getCycleProgress(id) {
 export function publishCycle(id) {
   return request.post(`/assessment-cycles/${id}/publish`)
 }
+
+export function listCycleEmployees(cycleId) {
+  return request.get(`/assessment-cycles/${cycleId}/employees`)
+}

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from collections import Counter
 import json
 
 from app.database import get_db
@@ -369,19 +370,65 @@ def cycle_progress(
         AssessmentRecord.cycle_id == cycle_id,
         AssessmentRecord.status.in_(["published", "archived"]),
     ).count()
-
     progress = round((completed / total * 100), 1) if total > 0 else 0
+
+    # 基于 AssessmentRecord 实际状态聚合计算各阶段进度，修复 cycle.status 布尔判断导致的过度乐观问题
+    records = db.query(AssessmentRecord).filter(AssessmentRecord.cycle_id == cycle_id).all()
+    status_counts = Counter(r.status for r in records)
+    total_records = len(records)
+
+    def _stage_status(completed_statuses, active_statuses=None):
+        if total_records == 0:
+            return "pending"
+        completed_count = sum(status_counts[s] for s in completed_statuses)
+        active_count = sum(status_counts[s] for s in (active_statuses or []))
+        if completed_count == total_records:
+            return "completed"
+        if active_count > 0 or completed_count > 0:
+            return "in_progress"
+        return "pending"
+
+    stages = [
+        {
+            "name": "自评",
+            "status": _stage_status(
+                completed_statuses=["pending_manager", "pending_peer", "pending_summary", "pending_approval", "pending_interview", "published", "archived", "cancelled"],
+            ),
+        },
+        {
+            "name": "上级评",
+            "status": _stage_status(
+                completed_statuses=["pending_peer", "pending_summary", "pending_approval", "pending_interview", "published", "archived", "cancelled"],
+                active_statuses=["pending_manager"],
+            ),
+        },
+        {
+            "name": "协作评",
+            "status": _stage_status(
+                completed_statuses=["pending_summary", "pending_approval", "pending_interview", "published", "archived", "cancelled"],
+                active_statuses=["pending_peer"],
+            ),
+        },
+        {
+            "name": "汇总",
+            "status": _stage_status(
+                completed_statuses=["pending_approval", "pending_interview", "published", "archived", "cancelled"],
+                active_statuses=["pending_summary"],
+            ),
+        },
+        {
+            "name": "审批",
+            "status": _stage_status(
+                completed_statuses=["pending_interview", "published", "archived", "cancelled"],
+                active_statuses=["pending_approval"],
+            ),
+        },
+    ]
 
     return {
         "cycle_id": cycle_id,
         "status": cycle.status,
-        "stages": [
-            {"name": "自评", "status": "completed" if cycle.status != "not_started" else "pending"},
-            {"name": "上级评", "status": "completed" if cycle.status in ["pending_peer", "pending_summary", "pending_approval", "published", "archived"] else "pending"},
-            {"name": "协作评", "status": "completed" if cycle.status in ["pending_summary", "pending_approval", "published", "archived"] else "pending"},
-            {"name": "汇总", "status": "completed" if cycle.status in ["pending_approval", "published", "archived"] else "pending"},
-            {"name": "审批", "status": "completed" if cycle.status in ["published", "archived"] else "pending"},
-        ],
+        "stages": stages,
         "overall_progress": progress,
         "total_employees": total,
         "completed": completed,

@@ -17,6 +17,8 @@ class TestAuthLogin:
         assert isinstance(data["access_token"], str) and len(data["access_token"]) > 10
         assert isinstance(data["refresh_token"], str) and len(data["refresh_token"]) > 10
         assert "id" in data["user"]
+        assert "employee_id" in data["user"], "login 返回必须包含 employee_id，前端 my-performance 依赖此字段"
+        assert "name" in data["user"], "login 返回必须包含 name"
 
     def test_login_invalid_password(self, client: TestClient, admin_user):
         resp = client.post("/auth/login", json={"username": "admin", "password": "wrongpassword"})
