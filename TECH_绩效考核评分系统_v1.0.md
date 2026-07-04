@@ -2987,13 +2987,49 @@ npm install
 ```bash
 # 后端（窗口 1）
 cd backend
-venv\Scripts\activate
+.venv\Scripts\activate
 python ../scripts/init_db.py        # 首次/重置时执行
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # 前端（窗口 2）
 cd frontend
 npm run dev
+```
+
+**后端代码热更新（Windows 最高效方式）**：
+
+> **严禁使用 `--reload`**：Windows 环境下 Uvicorn `--reload` 不可靠，常出现旧进程未完全退出、新代码未加载、端口占用等问题（见 Memory）。
+
+开发阶段修改后端代码后，使用 `scripts/restart.bat` 一键重启：
+
+```batch
+@echo off
+cd /d D:\cc_project\performance_evaluation_system\backend
+call .venv\Scripts\activate
+echo [1/3] 检查端口 8000 占用...
+netstat -ano | findstr :8000 > nul
+if %errorlevel% equ 0 (
+    echo 发现占用，正在终止旧进程...
+    tskill uvicorn
+    timeout /t 2 /nobreak > nul
+) else (
+    echo 端口空闲
+)
+echo [2/3] 启动新进程...
+start /b uvicorn app.main:app --host 0.0.0.0 --port 8000
+echo [3/3] 启动完成，Swagger: http://localhost:8000/docs
+```
+
+**IDE 快捷配置**（推荐绑定快捷键）：
+- VS Code: 在 `.vscode/tasks.json` 中配置 `"type": "shell"`，运行 `restart.bat`
+- PyCharm: 配置 External Tools，指向 `restart.bat`
+
+**手动重启（无脚本时）**：
+```bash
+# 窗口 1 按 Ctrl+C 停止后，重新执行
+cd backend
+.venv\Scripts\activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 **开发环境目录要求**：
