@@ -106,6 +106,58 @@ class TestKpiTemplateCreate:
         resp = client.post("/kpi-templates", json=payload, headers={"Authorization": f"Bearer {employee_token}"})
         assert resp.status_code == 403
 
+    def test_create_template_duplicate_names(self, client: TestClient, admin_token, db_session):
+        dept = Department(name="重复名部", code="DUP")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="重复名岗", department_id=dept.id)
+        db_session.add(pos)
+        db_session.commit()
+        db_session.refresh(pos)
+
+        payload = {
+            "position_id": pos.id,
+            "items": [
+                {"name": "指标A", "weight": 60, "target_value": "100"},
+                {"name": "指标A", "weight": 40, "target_value": "95%"}
+            ]
+        }
+        resp = client.post("/kpi-templates", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 422
+        assert "指标名称不能重复" in resp.json()["message"]
+
+    def test_create_template_empty_name(self, client: TestClient, admin_token, db_session):
+        dept = Department(name="空名部", code="EMPTY")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="空名岗", department_id=dept.id)
+        db_session.add(pos)
+        db_session.commit()
+        db_session.refresh(pos)
+
+        payload = {
+            "position_id": pos.id,
+            "items": [
+                {"name": "", "weight": 100, "target_value": "100"}
+            ]
+        }
+        resp = client.post("/kpi-templates", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 422
+
+    def test_create_template_items_empty(self, client: TestClient, admin_token, db_session):
+        dept = Department(name="空列表部", code="EMPTYLIST")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="空列表岗", department_id=dept.id)
+        db_session.add(pos)
+        db_session.commit()
+        db_session.refresh(pos)
+
+        payload = {"position_id": pos.id, "items": []}
+        resp = client.post("/kpi-templates", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 422
+        assert "指标列表不能为空" in resp.json()["message"]
+
 
 class TestKpiTemplateUpdate:
     """Tests for PUT /kpi-templates/{template_id}"""
@@ -159,6 +211,44 @@ class TestKpiTemplateUpdate:
         resp = client.put(f"/kpi-templates/{tmpl.id}", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
         assert resp.status_code == 422
 
+    def test_update_template_duplicate_names(self, client: TestClient, admin_token, db_session):
+        dept = Department(name="重复更新部", code="DUPUPD")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="重复更新岗", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+        tmpl = KpiTemplate(position_id=pos.id, name="原指标", weight=100, target_value="100", is_active=True)
+        db_session.add(tmpl)
+        db_session.commit()
+        db_session.refresh(tmpl)
+
+        payload = {
+            "items": [
+                {"name": "指标A", "weight": 50, "target_value": "100"},
+                {"name": "指标A", "weight": 50, "target_value": "95%"}
+            ]
+        }
+        resp = client.put(f"/kpi-templates/{tmpl.id}", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 422
+        assert "指标名称不能重复" in resp.json()["message"]
+
+    def test_update_template_empty_name(self, client: TestClient, admin_token, db_session):
+        dept = Department(name="空名更新部", code="EMPTYUPD")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="空名更新岗", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+        tmpl = KpiTemplate(position_id=pos.id, name="原指标", weight=100, target_value="100", is_active=True)
+        db_session.add(tmpl)
+        db_session.commit()
+        db_session.refresh(tmpl)
+
+        payload = {"items": [{"name": "", "weight": 100, "target_value": "100"}]}
+        resp = client.put(f"/kpi-templates/{tmpl.id}", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 422
+
 
 class TestKpiTemplateDelete:
     """Tests for DELETE /kpi-templates/{template_id}"""
@@ -184,6 +274,111 @@ class TestKpiTemplateDelete:
 
     def test_delete_template_unauthorized(self, client: TestClient, employee_token):
         resp = client.delete("/kpi-templates/1", headers={"Authorization": f"Bearer {employee_token}"})
+        assert resp.status_code == 403
+
+    def test_delete_template_referenced(self, client: TestClient, admin_token, db_session):
+        from datetime import date, timedelta
+        dept = Department(name="引用部", code="REF")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="引用岗", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+        tmpl = KpiTemplate(position_id=pos.id, name="被引用指标", weight=100, target_value="100", is_active=True)
+        db_session.add(tmpl)
+        db_session.flush()
+
+        cycle = AssessmentCycle(
+            name="引用周期", type="monthly", start_date=date.today(), end_date=date.today() + timedelta(days=30)
+        )
+        db_session.add(cycle)
+        db_session.flush()
+        emp = Employee(employee_no="REF001", name="引用员工", department_id=dept.id, position_id=pos.id)
+        db_session.add(emp)
+        db_session.flush()
+        record = AssessmentRecord(cycle_id=cycle.id, employee_id=emp.id, position_id=pos.id, department_id=dept.id)
+        db_session.add(record)
+        db_session.flush()
+
+        # Create a ScoreDetail referencing this template
+        from app.models import ScoreDetail
+        sd = ScoreDetail(record_id=record.id, kpi_template_id=tmpl.id, kpi_name=tmpl.name, weight=tmpl.weight)
+        db_session.add(sd)
+        db_session.commit()
+
+        resp = client.delete(f"/kpi-templates/{tmpl.id}", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 400
+        assert "已被考核记录引用" in resp.json()["message"]
+
+
+class TestKpiTemplateDetail:
+    """Tests for GET /kpi-templates/{template_id}"""
+
+    def test_get_template_detail_success(self, client: TestClient, admin_token, db_session):
+        dept = Department(name="详情部", code="DETAIL")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="详情岗", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+        tmpl = KpiTemplate(position_id=pos.id, name="详情指标", weight=100, target_value="100", is_active=True)
+        db_session.add(tmpl)
+        db_session.commit()
+        db_session.refresh(tmpl)
+
+        resp = client.get(f"/kpi-templates/{tmpl.id}", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == tmpl.id
+        assert data["name"] == "详情指标"
+        assert data["position_id"] == pos.id
+        assert data["position_name"] == "详情岗"
+        assert data["weight"] == 100
+        assert data["target_value"] == "100"
+        assert data["is_active"] is True
+
+    def test_get_template_detail_not_found(self, client: TestClient, admin_token):
+        resp = client.get("/kpi-templates/99999", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 404
+
+    def test_get_template_detail_unauthorized(self, client: TestClient):
+        resp = client.get("/kpi-templates/1")
+        assert resp.status_code == 401
+
+
+class TestKpiTemplateCopy:
+    """Tests for POST /kpi-templates/{template_id}/copy"""
+
+    def test_copy_template_success(self, client: TestClient, admin_token, db_session):
+        dept = Department(name="复制部", code="COPY")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="复制岗", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+        tmpl = KpiTemplate(position_id=pos.id, name="原指标", weight=100, target_value="100", scoring_method="percentage", description="描述", is_active=True)
+        db_session.add(tmpl)
+        db_session.commit()
+        db_session.refresh(tmpl)
+
+        resp = client.post(f"/kpi-templates/{tmpl.id}/copy", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["name"] == "原指标-副本"
+        assert data["position_id"] == pos.id
+        assert data["weight"] == 100
+        assert data["target_value"] == "100"
+        assert data["scoring_method"] == "percentage"
+        assert data["description"] == "描述"
+        assert data["is_active"] is True
+        assert data["id"] != tmpl.id
+
+    def test_copy_template_not_found(self, client: TestClient, admin_token):
+        resp = client.post("/kpi-templates/99999/copy", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 404
+
+    def test_copy_template_unauthorized(self, client: TestClient, employee_token):
+        resp = client.post("/kpi-templates/1/copy", headers={"Authorization": f"Bearer {employee_token}"})
         assert resp.status_code == 403
 
 

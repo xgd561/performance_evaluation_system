@@ -1,7 +1,7 @@
 import request from './request'
 
-export function listDepartments() {
-  return request.get('/departments')
+export function listDepartments(tree = false) {
+  return request.get('/departments', { params: tree ? { tree: true } : {} })
 }
 
 export function createDepartment(data) {

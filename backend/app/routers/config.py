@@ -12,19 +12,11 @@ from app.schemas import (
     SmallDeptExemptionConfig,
 )
 
+from app.services import config_service
 from app.services.operation_logger import log_operation
+from app.core.constants import SCORING_ANCHORS
 
 router = APIRouter()
-
-
-def _get_or_create_config(db: Session, key: str, default_value: str):
-    cfg = db.query(SystemConfig).filter(SystemConfig.key == key).first()
-    if not cfg:
-        cfg = SystemConfig(key=key, value=default_value)
-        db.add(cfg)
-        db.commit()
-        db.refresh(cfg)
-    return cfg
 
 
 @router.get("/grade-rules")
@@ -32,16 +24,7 @@ def get_grade_rules(
     db: Session = Depends(get_db),
     user = Depends(require_role("admin")),
 ):
-    cfg = _get_or_create_config(
-        db, "grade_rules",
-        json.dumps({
-            "A": {"min": 90, "max": 100, "ratio_limit": 0.2},
-            "B": {"min": 80, "max": 89.9, "ratio_limit": 0.5},
-            "C": {"min": 60, "max": 79.9, "ratio_limit": 0.25},
-            "D": {"min": 0, "max": 59.9, "ratio_limit": 0.05},
-        })
-    )
-    return json.loads(cfg.value)
+    return config_service.get_grade_rules(db)
 
 
 @router.put("/grade-rules")
@@ -87,10 +70,11 @@ def update_grade_rules(
             detail=str(e),
         )
 
-    cfg = _get_or_create_config(db, "grade_rules", "{}")
+    cfg = config_service._get_or_create_config(db, "grade_rules", "{}")
     old_value = json.loads(cfg.value) if cfg.value else {}
     cfg.value = json.dumps(parsed)
     db.commit()
+    config_service.invalidate_config_cache("grade_rules")
 
     log_operation(
         db=db,
@@ -110,19 +94,7 @@ def get_dimension_weights(
     db: Session = Depends(get_db),
     user = Depends(require_role("admin")),
 ):
-    cfg = _get_or_create_config(
-        db, "dimension_weights",
-        json.dumps({"performance": 0.6, "ability": 0.2, "attitude": 0.2})
-    )
-    data = json.loads(cfg.value)
-    # Convert to percentage integers if they are decimals (for tests)
-    result = {}
-    for k, v in data.items():
-        if isinstance(v, float) and v <= 1.0:
-            result[k] = int(v * 100)
-        else:
-            result[k] = v
-    return result
+    return config_service.get_dimension_weights(db)
 
 
 @router.put("/dimension-weights")
@@ -149,9 +121,10 @@ def update_dimension_weights(
             detail=f"维度权重总和必须等于100，当前为{total}",
         )
 
-    cfg = _get_or_create_config(db, "dimension_weights", "{}")
+    cfg = config_service._get_or_create_config(db, "dimension_weights", "{}")
     cfg.value = json.dumps(weights)
     db.commit()
+    config_service.invalidate_config_cache("dimension_weights")
 
     log_operation(
         db=db,
@@ -170,16 +143,7 @@ def get_reviewer_weights(
     db: Session = Depends(get_db),
     user = Depends(require_role("admin")),
 ):
-    cfg = _get_or_create_config(
-        db, "reviewer_weights",
-        json.dumps({
-            "performance": {"self": 30, "manager": 70, "peer": 0},
-            "ability": {"self": 20, "manager": 60, "peer": 20},
-            "attitude": {"self": 10, "manager": 50, "peer": 40}
-        })
-    )
-    data = json.loads(cfg.value)
-    return data
+    return config_service.get_reviewer_weights(db)
 
 
 @router.put("/reviewer-weights")
@@ -205,10 +169,11 @@ def update_reviewer_weights(
             detail=str(e),
         )
 
-    cfg = _get_or_create_config(db, "reviewer_weights", "{}")
+    cfg = config_service._get_or_create_config(db, "reviewer_weights", "{}")
     old_value = json.loads(cfg.value) if cfg.value else {}
     cfg.value = json.dumps(validated.model_dump())
     db.commit()
+    config_service.invalidate_config_cache("reviewer_weights")
 
     log_operation(
         db=db,
@@ -228,11 +193,7 @@ def get_small_dept_exemption(
     db: Session = Depends(get_db),
     user = Depends(require_role("admin")),
 ):
-    cfg = _get_or_create_config(
-        db, "small_dept_exemption",
-        json.dumps({"enabled": True, "threshold": 5})
-    )
-    return json.loads(cfg.value)
+    return config_service.get_small_dept_exemption(db)
 
 
 @router.put("/small-dept-exemption")
@@ -241,9 +202,30 @@ def update_small_dept_exemption(
     db: Session = Depends(get_db),
     user = Depends(require_role("admin")),
 ):
-    cfg = _get_or_create_config(db, "small_dept_exemption", "{}")
-    cfg.value = json.dumps(req)
+    enabled = req.get("enabled")
+    if not isinstance(enabled, bool):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="enabled 必须为布尔值",
+        )
+
+    threshold = req.get("threshold")
+    if not isinstance(threshold, int) or isinstance(threshold, bool):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="threshold 必须为整数",
+        )
+    if threshold < 1 or threshold > 50:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="threshold 必须在 1-50 之间",
+        )
+
+    payload = {"enabled": enabled, "threshold": threshold}
+    cfg = config_service._get_or_create_config(db, "small_dept_exemption", "{}")
+    cfg.value = json.dumps(payload)
     db.commit()
+    config_service.invalidate_config_cache("small_dept_exemption")
 
     log_operation(
         db=db,
@@ -251,10 +233,10 @@ def update_small_dept_exemption(
         action="update_small_dept_exemption",
         target_type="system_config",
         target_id=cfg.id,
-        new_value={"small_dept_exemption": req},
+        new_value={"small_dept_exemption": payload},
     )
 
-    return {"code": 200, "message": "小部门豁免配置已保存", "enabled": req.get("enabled"), "threshold": req.get("threshold")}
+    return {"code": 200, "message": "小部门豁免配置已保存", "enabled": enabled, "threshold": threshold}
 
 
 @router.get("/peer-review-enabled")
@@ -262,11 +244,7 @@ def get_peer_review_enabled(
     db: Session = Depends(get_db),
     user = Depends(require_role("admin", "hr", "manager")),
 ):
-    cfg = _get_or_create_config(
-        db, "peer_review_enabled",
-        json.dumps({"enabled": True})
-    )
-    return json.loads(cfg.value)
+    return config_service.get_peer_review_enabled(db)
 
 
 @router.put("/peer-review-enabled")
@@ -282,9 +260,10 @@ def update_peer_review_enabled(
             detail="enabled 必须为布尔值",
         )
 
-    cfg = _get_or_create_config(db, "peer_review_enabled", "{}")
+    cfg = config_service._get_or_create_config(db, "peer_review_enabled", "{}")
     cfg.value = json.dumps({"enabled": enabled})
     db.commit()
+    config_service.invalidate_config_cache("peer_review_enabled")
 
     log_operation(
         db=db,
@@ -296,3 +275,19 @@ def update_peer_review_enabled(
     )
 
     return {"code": 200, "message": "协作评分配置已更新", "enabled": enabled}
+
+
+@router.get("/scoring-anchors")
+def get_scoring_anchors(
+    user=Depends(require_role("admin", "hr", "manager", "employee")),
+):
+    """Return scoring anchor constants for UI display."""
+    return {"anchors": SCORING_ANCHORS}
+
+
+@router.get("/scoring-anchors")
+def get_scoring_anchors(
+    user = Depends(require_role("admin", "hr", "manager", "employee")),
+):
+    """Return scoring anchor reference data."""
+    return {"code": 200, "anchors": SCORING_ANCHORS}

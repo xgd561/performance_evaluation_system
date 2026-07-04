@@ -117,11 +117,16 @@ class EmployeeListResponse(BaseModel):
 
 # ------------------ KPI Template ------------------
 class KpiItemCreate(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1)
     weight: Decimal
     target_value: Optional[str] = None
     scoring_method: Optional[str] = "percentage"
     description: Optional[str] = None
+
+
+# Alias per PRD/TECH naming convention
+KpiIndicatorSchema = KpiItemCreate
+
 
 class KpiTemplateCreate(BaseModel):
     position_id: int
@@ -129,7 +134,16 @@ class KpiTemplateCreate(BaseModel):
 
     @field_validator('items')
     @classmethod
-    def check_weight_sum(cls, v):
+    def check_items(cls, v):
+        if not v:
+            raise ValueError("KPI模板指标列表不能为空")
+
+        # Check name uniqueness
+        names = [item.name.strip() for item in v]
+        if len(names) != len(set(names)):
+            raise ValueError("KPI模板指标名称不能重复")
+
+        # Check weight sum = 100
         total = sum(item.weight for item in v)
         if total != 100:
             raise ValueError(f"KPI模板权重总和必须等于100%，当前为{total}%")
@@ -157,7 +171,16 @@ class KpiTemplateUpdate(BaseModel):
 
     @field_validator('items')
     @classmethod
-    def check_weight_sum(cls, v):
+    def check_items(cls, v):
+        if not v:
+            raise ValueError("KPI模板指标列表不能为空")
+
+        # Check name uniqueness
+        names = [item.name.strip() for item in v]
+        if len(names) != len(set(names)):
+            raise ValueError("KPI模板指标名称不能重复")
+
+        # Check weight sum = 100
         total = sum(item.weight for item in v)
         if total != 100:
             raise ValueError(f"KPI模板权重总和必须等于100%，当前为{total}%")

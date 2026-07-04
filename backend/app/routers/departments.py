@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from app.database import get_db
 from app.auth import get_current_user, require_role
@@ -19,9 +19,49 @@ router = APIRouter()
 
 @router.get("")
 def list_departments(
+    tree: bool = False,
     db: Session = Depends(get_db),
     user: Employee = Depends(get_current_user),
 ):
+    if tree:
+        # 使用递归 CTE 查询所有部门及其层级
+        stmt = text("""
+            WITH RECURSIVE dept_tree AS (
+                SELECT id, name, code, parent_id, head_id, created_at, 0 AS level
+                FROM departments
+                WHERE parent_id IS NULL
+                UNION ALL
+                SELECT d.id, d.name, d.code, d.parent_id, d.head_id, d.created_at, dt.level + 1
+                FROM departments d
+                INNER JOIN dept_tree dt ON d.parent_id = dt.id
+            )
+            SELECT * FROM dept_tree ORDER BY level, id
+        """)
+        rows = db.execute(stmt).mappings().all()
+        nodes = {}
+        roots = []
+        for row in rows:
+            node = {
+                "id": row["id"],
+                "name": row["name"],
+                "code": row["code"],
+                "parent_id": row["parent_id"],
+                "head_id": row["head_id"],
+                "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
+                "level": row["level"],
+                "children": []
+            }
+            nodes[row["id"]] = node
+        for row in rows:
+            node = nodes[row["id"]]
+            if row["parent_id"] is None:
+                roots.append(node)
+            else:
+                parent = nodes.get(row["parent_id"])
+                if parent:
+                    parent["children"].append(node)
+        return roots
+
     depts = db.query(Department).all()
     # Build a map for parent lookup
     dept_map = {d.id: d for d in depts}
@@ -91,14 +131,18 @@ def delete_department(
     dept = db.query(Department).filter(Department.id == dept_id).first()
     if not dept:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="部门不存在")
+    # Check if department has children departments
+    children = db.query(Department).filter(Department.parent_id == dept_id).first()
+    if children:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="部门下存在子部门，不可删除")
     # Check if department has employees
     employees = db.query(Employee).filter(Employee.department_id == dept_id).first()
     if employees:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="部门下存在员工，不可删除")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="部门下存在员工，不可删除")
     # Check if department has positions
     positions = db.query(Position).filter(Position.department_id == dept_id).first()
     if positions:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="部门下存在岗位，不可删除")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="部门下存在岗位，不可删除")
     db.delete(dept)
     db.commit()
     return

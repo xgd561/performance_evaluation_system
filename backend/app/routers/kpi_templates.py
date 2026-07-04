@@ -4,7 +4,7 @@ import json
 
 from app.database import get_db
 from app.auth import get_current_user, require_role
-from app.models import KpiTemplate, KpiAdjustment, AssessmentRecord, Employee
+from app.models import KpiTemplate, KpiAdjustment, AssessmentRecord, Employee, ScoreDetail
 from app.services.operation_logger import log_operation
 from app.schemas import (
     KpiTemplateCreate,
@@ -40,6 +40,29 @@ def list_kpi_templates(
         }
         for t in templates
     ]
+
+
+@router.get("/{template_id}")
+def get_kpi_template_detail(
+    template_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    tmpl = db.query(KpiTemplate).options(joinedload(KpiTemplate.position)).filter(KpiTemplate.id == template_id).first()
+    if not tmpl:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="KPI模板不存在")
+    return {
+        "id": tmpl.id,
+        "position_id": tmpl.position_id,
+        "position_name": tmpl.position.name if tmpl.position else None,
+        "name": tmpl.name,
+        "weight": tmpl.weight,
+        "target_value": tmpl.target_value,
+        "scoring_method": tmpl.scoring_method,
+        "description": tmpl.description,
+        "is_active": tmpl.is_active,
+        "created_at": tmpl.created_at,
+    }
 
 
 @router.post("/single", status_code=status.HTTP_201_CREATED)
@@ -149,6 +172,64 @@ def update_kpi_template(
     }
 
 
+@router.get("/{template_id}")
+def get_kpi_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    tmpl = db.query(KpiTemplate).options(joinedload(KpiTemplate.position)).filter(KpiTemplate.id == template_id).first()
+    if not tmpl:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="KPI模板不存在")
+    return {
+        "id": tmpl.id,
+        "position_id": tmpl.position_id,
+        "position_name": tmpl.position.name if tmpl.position else None,
+        "name": tmpl.name,
+        "weight": tmpl.weight,
+        "target_value": tmpl.target_value,
+        "scoring_method": tmpl.scoring_method,
+        "description": tmpl.description,
+        "is_active": tmpl.is_active,
+        "created_at": tmpl.created_at,
+    }
+
+
+@router.post("/{template_id}/copy", status_code=status.HTTP_201_CREATED)
+def copy_kpi_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin")),
+):
+    tmpl = db.query(KpiTemplate).filter(KpiTemplate.id == template_id).first()
+    if not tmpl:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="KPI模板不存在")
+
+    copied = KpiTemplate(
+        position_id=tmpl.position_id,
+        name=tmpl.name + "-副本",
+        weight=tmpl.weight,
+        target_value=tmpl.target_value,
+        scoring_method=tmpl.scoring_method,
+        description=tmpl.description,
+    )
+    db.add(copied)
+    db.commit()
+    db.refresh(copied)
+    return {
+        "id": copied.id,
+        "position_id": copied.position_id,
+        "position_name": copied.position.name if copied.position else None,
+        "name": copied.name,
+        "weight": copied.weight,
+        "target_value": copied.target_value,
+        "scoring_method": copied.scoring_method,
+        "description": copied.description,
+        "is_active": copied.is_active,
+        "created_at": copied.created_at,
+    }
+
+
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_kpi_template(
     template_id: int,
@@ -158,6 +239,15 @@ def delete_kpi_template(
     tmpl = db.query(KpiTemplate).filter(KpiTemplate.id == template_id).first()
     if not tmpl:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="KPI模板不存在")
+
+    # Reference protection: check if any ScoreDetail references this template
+    ref_count = db.query(ScoreDetail).filter(ScoreDetail.kpi_template_id == template_id).count()
+    if ref_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该KPI模板已被考核记录引用，无法删除",
+        )
+
     db.delete(tmpl)
     db.commit()
     return

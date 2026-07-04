@@ -58,16 +58,6 @@ class TestDepartmentCreate:
         assert data["code"] == "NEWDEPT"
         assert data["id"] is not None
         assert "created_at" in data
-        assert data["id"] is not None
-        assert "created_at" in data
-        assert data["id"] is not None
-        assert "created_at" in data
-        assert data["id"] is not None
-        assert "created_at" in data
-        assert data["id"] is not None
-        assert "created_at" in data
-        assert data["id"] is not None
-        assert "created_at" in data
 
     def test_create_department_duplicate_code(self, client: TestClient, admin_token, db_session):
         dept = Department(name="已有部门", code="EXIST")
@@ -154,7 +144,7 @@ class TestDepartmentDelete:
         db_session.refresh(dept)
 
         resp = client.delete(f"/departments/{dept.id}", headers={"Authorization": f"Bearer {admin_token}"})
-        assert resp.status_code == 409
+        assert resp.status_code == 400
         assert resp.json()["message"] == "部门下存在员工，不可删除"
 
     def test_delete_department_with_positions(self, client: TestClient, admin_token, db_session):
@@ -167,8 +157,22 @@ class TestDepartmentDelete:
         db_session.refresh(dept)
 
         resp = client.delete(f"/departments/{dept.id}", headers={"Authorization": f"Bearer {admin_token}"})
-        assert resp.status_code == 409
+        assert resp.status_code == 400
         assert resp.json()["message"] == "部门下存在岗位，不可删除"
+
+    def test_delete_department_with_children(self, client: TestClient, admin_token, db_session):
+        """删除有子部门的部门应返回 400"""
+        parent = Department(name="父部门", code="PARENT")
+        db_session.add(parent)
+        db_session.flush()
+        child = Department(name="子部门", code="CHILD", parent_id=parent.id)
+        db_session.add(child)
+        db_session.commit()
+        db_session.refresh(parent)
+
+        resp = client.delete(f"/departments/{parent.id}", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 400
+        assert resp.json()["message"] == "部门下存在子部门，不可删除"
 
     def test_delete_department_not_found(self, client: TestClient, admin_token):
         resp = client.delete("/departments/99999", headers={"Authorization": f"Bearer {admin_token}"})
@@ -177,6 +181,86 @@ class TestDepartmentDelete:
     def test_delete_department_unauthorized(self, client: TestClient, employee_token):
         resp = client.delete("/departments/1", headers={"Authorization": f"Bearer {employee_token}"})
         assert resp.status_code == 403
+
+
+class TestDepartmentTree:
+    """Tests for GET /departments?tree=true (recursive CTE tree query)"""
+
+    def test_tree_query_returns_nested_structure(self, client: TestClient, admin_token, db_session):
+        """创建研发部 → 创建产品部（parent_id=研发部）→ 树形查询返回正确层级."""
+        # Create root department
+        rd = Department(name="研发部", code="RD")
+        db_session.add(rd)
+        db_session.flush()
+        # Create child department
+        pd = Department(name="产品部", code="PD", parent_id=rd.id)
+        db_session.add(pd)
+        db_session.commit()
+
+        resp = client.get("/departments?tree=true", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+
+        # Find root node
+        rd_node = next(d for d in data if d["name"] == "研发部")
+        assert rd_node["code"] == "RD"
+        assert rd_node["parent_id"] is None
+        assert rd_node["level"] == 0
+        assert "children" in rd_node
+        assert len(rd_node["children"]) == 1
+
+        # Verify child node
+        child = rd_node["children"][0]
+        assert child["name"] == "产品部"
+        assert child["code"] == "PD"
+        assert child["parent_id"] == rd.id
+        assert child["level"] == 1
+        assert child["children"] == []
+
+    def test_tree_query_with_deep_nesting(self, client: TestClient, admin_token, db_session):
+        """验证三级嵌套部门树形查询."""
+        # Create grandparent
+        gp = Department(name="总公司", code="HQ")
+        db_session.add(gp)
+        db_session.flush()
+        # Create parent
+        p = Department(name="分公司", code="BRANCH", parent_id=gp.id)
+        db_session.add(p)
+        db_session.flush()
+        # Create child
+        c = Department(name="办事处", code="OFFICE", parent_id=p.id)
+        db_session.add(c)
+        db_session.commit()
+
+        resp = client.get("/departments?tree=true", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+
+        hq_node = next(d for d in data if d["name"] == "总公司")
+        assert hq_node["level"] == 0
+        assert len(hq_node["children"]) == 1
+
+        branch_node = hq_node["children"][0]
+        assert branch_node["name"] == "分公司"
+        assert branch_node["level"] == 1
+        assert len(branch_node["children"]) == 1
+
+        office_node = branch_node["children"][0]
+        assert office_node["name"] == "办事处"
+        assert office_node["level"] == 2
+        assert office_node["children"] == []
+
+    def test_tree_query_no_auth(self, client: TestClient):
+        resp = client.get("/departments?tree=true")
+        assert resp.status_code == 401
+
+    def test_tree_query_empty(self, client: TestClient, admin_token):
+        """无部门时树形查询返回空列表."""
+        resp = client.get("/departments?tree=true", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
 
 
 class TestPositionList:
@@ -257,9 +341,6 @@ class TestPositionUpdate:
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "新岗位名"
-        assert data["id"] == pos.id
-        assert data["department_id"] == dept.id
-        assert "created_at" in data
         assert data["id"] == pos.id
         assert data["department_id"] == dept.id
         assert "created_at" in data

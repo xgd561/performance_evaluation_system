@@ -1,8 +1,21 @@
 <template>
   <div>
     <h2>系统配置</h2>
-    <el-tabs v-model="activeTab" class="mt-20">
-      <el-tab-pane label="等级规则" name="grades">
+    <el-alert
+      type="warning"
+      :closable="false"
+      show-icon
+      class="mb-20"
+      title="配置变更将仅影响新考核周期"
+    />
+    <el-tabs v-model="activeTab" tab-position="left" class="config-tabs">
+      <el-tab-pane name="grades">
+        <template #label>
+          <span class="tab-label">
+            等级规则
+            <el-badge v-if="unconfigured.grades" is-dot type="danger" class="config-badge" />
+          </span>
+        </template>
         <el-card>
           <el-form label-width="120px">
             <el-form-item v-for="(rule, grade) in gradeRules" :key="grade" :label="grade">
@@ -31,7 +44,13 @@
         </el-card>
       </el-tab-pane>
 
-      <el-tab-pane label="维度权重" name="weights">
+      <el-tab-pane name="weights">
+        <template #label>
+          <span class="tab-label">
+            维度权重
+            <el-badge v-if="unconfigured.weights" is-dot type="danger" class="config-badge" />
+          </span>
+        </template>
         <el-card>
           <el-form label-width="120px">
             <el-form-item label="工作业绩权重">
@@ -53,7 +72,13 @@
         </el-card>
       </el-tab-pane>
 
-      <el-tab-pane label="评价人权重" name="reviewers">
+      <el-tab-pane name="reviewers">
+        <template #label>
+          <span class="tab-label">
+            评价人权重
+            <el-badge v-if="unconfigured.reviewers" is-dot type="danger" class="config-badge" />
+          </span>
+        </template>
         <el-card>
           <el-form label-width="120px">
             <h4>业绩维度</h4>
@@ -105,11 +130,17 @@
         </el-card>
       </el-tab-pane>
 
-      <el-tab-pane label="小部门豁免" name="small_dept">
+      <el-tab-pane name="small_dept">
+        <template #label>
+          <span class="tab-label">
+            小部门豁免
+            <el-badge v-if="unconfigured.small_dept" is-dot type="danger" class="config-badge" />
+          </span>
+        </template>
         <el-card>
           <el-form label-width="180px">
             <el-form-item label="部门人数阈值">
-              <el-input-number v-model="smallDeptExemption.threshold" :min="0" :max="50" :precision="0" />
+              <el-input-number v-model="smallDeptExemption.threshold" :min="1" :max="50" :precision="0" />
               <span class="hint"> 人以下视为小部门，不参与强制分布</span>
             </el-form-item>
             <el-form-item label="豁免开关">
@@ -121,7 +152,14 @@
           </el-form>
         </el-card>
       </el-tab-pane>
-      <el-tab-pane label="协作评分开关" name="peer_review">
+
+      <el-tab-pane name="peer_review">
+        <template #label>
+          <span class="tab-label">
+            协作评分开关
+            <el-badge v-if="unconfigured.peer_review" is-dot type="danger" class="config-badge" />
+          </span>
+        </template>
         <el-card>
           <el-form label-width="180px">
             <el-form-item label="协作评分全局默认值">
@@ -173,6 +211,44 @@ const ratioTotal = computed(() => {
   }
   return total
 })
+
+const unconfigured = reactive({
+  grades: false,
+  weights: false,
+  reviewers: false,
+  small_dept: false,
+  peer_review: false,
+})
+
+function checkUnconfigured() {
+  // If values match hardcoded defaults, mark as unconfigured (suggest user to review)
+  const isGradeDefault =
+    gradeRules.A.min === 90 && gradeRules.A.max === 100 && gradeRules.A.ratio_limit === 20 &&
+    gradeRules.B.min === 80 && gradeRules.B.max === 89.9 && gradeRules.B.ratio_limit === 50 &&
+    gradeRules.C.min === 60 && gradeRules.C.max === 79.9 && gradeRules.C.ratio_limit === 25 &&
+    gradeRules.D.min === 0 && gradeRules.D.max === 59.9 && gradeRules.D.ratio_limit === 5
+
+  const isWeightsDefault =
+    dimensionWeights.performance === 60 &&
+    dimensionWeights.ability === 20 &&
+    dimensionWeights.attitude === 20
+
+  const isReviewersDefault =
+    reviewerWeights.performance.self === 30 && reviewerWeights.performance.manager === 70 && reviewerWeights.performance.peer === 0 &&
+    reviewerWeights.ability.self === 20 && reviewerWeights.ability.manager === 60 && reviewerWeights.ability.peer === 20 &&
+    reviewerWeights.attitude.self === 10 && reviewerWeights.attitude.manager === 50 && reviewerWeights.attitude.peer === 40
+
+  const isSmallDeptDefault =
+    smallDeptExemption.threshold === 5 && smallDeptExemption.enabled === true
+
+  const isPeerReviewDefault = peerReviewEnabled.value === true
+
+  unconfigured.grades = isGradeDefault
+  unconfigured.weights = isWeightsDefault
+  unconfigured.reviewers = isReviewersDefault
+  unconfigured.small_dept = isSmallDeptDefault
+  unconfigured.peer_review = isPeerReviewDefault
+}
 
 function validateGradeRules() {
   const grades = ['A', 'B', 'C', 'D']
@@ -253,6 +329,8 @@ async function loadAll() {
     if (pr && typeof pr.enabled === 'boolean') {
       peerReviewEnabled.value = pr.enabled
     }
+
+    checkUnconfigured()
   } catch (e) {
     console.error(e)
   }
@@ -275,6 +353,7 @@ async function saveGradeRules() {
   try {
     await updateGradeRules(payload)
     ElMessage.success('保存成功')
+    unconfigured.grades = false
   } catch (e) {
     console.error(e)
   }
@@ -288,6 +367,7 @@ async function saveDimensionWeights() {
   try {
     await updateDimensionWeights(dimensionWeights)
     ElMessage.success('保存成功')
+    unconfigured.weights = false
   } catch (e) {
     console.error(e)
   }
@@ -301,6 +381,7 @@ async function saveReviewerWeights() {
   try {
     await updateReviewerWeights(reviewerWeights)
     ElMessage.success('保存成功')
+    unconfigured.reviewers = false
   } catch (e) {
     console.error(e)
   }
@@ -310,6 +391,7 @@ async function saveSmallDept() {
   try {
     await updateSmallDeptExemption(smallDeptExemption)
     ElMessage.success('保存成功')
+    unconfigured.small_dept = false
   } catch (e) {
     console.error(e)
   }
@@ -319,6 +401,7 @@ async function savePeerReviewEnabled() {
   try {
     await updatePeerReviewEnabled({ enabled: peerReviewEnabled.value })
     ElMessage.success('保存成功')
+    unconfigured.peer_review = false
   } catch (e) {
     console.error(e)
   }
@@ -330,11 +413,22 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.mt-20 {
-  margin-top: 20px;
+.mb-20 {
+  margin-bottom: 20px;
 }
 .hint {
   color: #909399;
   margin-left: 8px;
+}
+.tab-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.config-badge :deep(.el-badge__content.is-dot) {
+  position: relative;
+  top: 0;
+  right: 0;
 }
 </style>

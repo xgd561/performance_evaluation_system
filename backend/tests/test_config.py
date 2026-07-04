@@ -199,6 +199,202 @@ class TestConfigReviewerWeights:
         assert resp.status_code == 403
 
 
+class TestConfigPeerReviewEnabled:
+    """Tests for GET/PUT /config/peer-review-enabled"""
+
+    def test_get_peer_review_enabled_success_admin(self, client: TestClient, admin_token):
+        resp = client.get("/config/peer-review-enabled", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "enabled" in data
+        assert isinstance(data["enabled"], bool)
+
+    def test_get_peer_review_enabled_success_hr(self, client: TestClient, hr_token):
+        resp = client.get("/config/peer-review-enabled", headers={"Authorization": f"Bearer {hr_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "enabled" in data
+        assert isinstance(data["enabled"], bool)
+
+    def test_get_peer_review_enabled_success_manager(self, client: TestClient, manager_token):
+        resp = client.get("/config/peer-review-enabled", headers={"Authorization": f"Bearer {manager_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "enabled" in data
+        assert isinstance(data["enabled"], bool)
+
+    def test_get_peer_review_enabled_unauthorized_employee(self, client: TestClient, employee_token):
+        resp = client.get("/config/peer-review-enabled", headers={"Authorization": f"Bearer {employee_token}"})
+        assert resp.status_code == 403
+
+    def test_get_peer_review_enabled_unauthorized_peer(self, client: TestClient, peer_token):
+        resp = client.get("/config/peer-review-enabled", headers={"Authorization": f"Bearer {peer_token}"})
+        assert resp.status_code == 403
+
+    def test_update_peer_review_enabled_success(self, client: TestClient, admin_token):
+        # Toggle to False
+        resp = client.put(
+            "/config/peer-review-enabled",
+            json={"enabled": False},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["message"] == "协作评分配置已更新"
+        assert resp.json()["enabled"] is False
+
+        # Persistence round-trip check
+        get_resp = client.get("/config/peer-review-enabled", headers={"Authorization": f"Bearer {admin_token}"})
+        data = get_resp.json()
+        assert data["enabled"] is False
+
+        # Toggle back to True
+        resp = client.put(
+            "/config/peer-review-enabled",
+            json={"enabled": True},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["enabled"] is True
+
+    def test_update_peer_review_enabled_not_bool(self, client: TestClient, admin_token):
+        resp = client.put(
+            "/config/peer-review-enabled",
+            json={"enabled": "yes"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 422
+        assert "enabled 必须为布尔值" in resp.json()["message"]
+
+    def test_update_peer_review_enabled_unauthorized_hr(self, client: TestClient, hr_token):
+        resp = client.put(
+            "/config/peer-review-enabled",
+            json={"enabled": True},
+            headers={"Authorization": f"Bearer {hr_token}"},
+        )
+        assert resp.status_code == 403
+
+    def test_update_peer_review_enabled_unauthorized_manager(self, client: TestClient, manager_token):
+        resp = client.put(
+            "/config/peer-review-enabled",
+            json={"enabled": True},
+            headers={"Authorization": f"Bearer {manager_token}"},
+        )
+        assert resp.status_code == 403
+
+    def test_update_peer_review_enabled_unauthorized_employee(self, client: TestClient, employee_token):
+        resp = client.put(
+            "/config/peer-review-enabled",
+            json={"enabled": True},
+            headers={"Authorization": f"Bearer {employee_token}"},
+        )
+        assert resp.status_code == 403
+
+
+class TestPydanticValidators:
+    """Direct unit tests for Pydantic schemas (boundary values, illegal values)"""
+
+    def test_grade_rule_entry_ratio_limit_over_1(self):
+        from app.schemas import GradeRuleEntry
+        with pytest.raises(ValueError) as exc:
+            GradeRuleEntry(min=0, max=100, ratio_limit=1.5)
+        assert "ratio_limit" in str(exc.value).lower() or "1.5" in str(exc.value)
+
+    def test_grade_rule_entry_min_negative(self):
+        from app.schemas import GradeRuleEntry
+        with pytest.raises(ValueError) as exc:
+            GradeRuleEntry(min=-1, max=100, ratio_limit=0.2)
+        assert "ge" in str(exc.value).lower() or "-1" in str(exc.value)
+
+    def test_grade_rule_entry_max_over_100(self):
+        from app.schemas import GradeRuleEntry
+        with pytest.raises(ValueError) as exc:
+            GradeRuleEntry(min=0, max=101, ratio_limit=0.2)
+        assert "le" in str(exc.value).lower() or "101" in str(exc.value)
+
+    def test_grade_rule_entry_min_ge_max(self):
+        from app.schemas import GradeRuleEntry
+        with pytest.raises(ValueError) as exc:
+            GradeRuleEntry(min=90, max=90, ratio_limit=0.2)
+        assert "min" in str(exc.value) and "max" in str(exc.value)
+
+    def test_grade_rules_schema_missing_grade(self):
+        from app.schemas import GradeRulesSchema
+        with pytest.raises(ValueError) as exc:
+            GradeRulesSchema.model_validate({
+                "A": {"min": 90, "max": 100, "ratio_limit": 0.2},
+                "B": {"min": 80, "max": 89.9, "ratio_limit": 0.5},
+                "C": {"min": 60, "max": 79.9, "ratio_limit": 0.25},
+            })
+        assert "Field required" in str(exc.value) or "D" in str(exc.value)
+
+    def test_grade_rules_schema_ratio_sum_exceeds_1(self):
+        from app.schemas import GradeRulesSchema
+        with pytest.raises(ValueError) as exc:
+            GradeRulesSchema.model_validate({
+                "A": {"min": 90, "max": 100, "ratio_limit": 0.5},
+                "B": {"min": 80, "max": 89.9, "ratio_limit": 0.5},
+                "C": {"min": 60, "max": 79.9, "ratio_limit": 0.25},
+                "D": {"min": 0, "max": 59.9, "ratio_limit": 0.05},
+            })
+        assert "ratio_limit合计不能超过100%" in str(exc.value)
+
+    def test_reviewer_weights_entry_sum_not_100(self):
+        from app.schemas import ReviewerWeightEntry
+        with pytest.raises(ValueError) as exc:
+            ReviewerWeightEntry(self=30, manager=50, peer=10)
+        assert "权重总和必须等于100" in str(exc.value)
+
+    def test_reviewer_weights_config_missing_dimension(self):
+        from app.schemas import ReviewerWeightsConfig
+        with pytest.raises(ValueError) as exc:
+            ReviewerWeightsConfig.model_validate({
+                "performance": {"self": 30, "manager": 70, "peer": 0},
+                "ability": {"self": 20, "manager": 60, "peer": 20},
+            })
+        assert "缺少维度" in str(exc.value)
+
+    def test_kpi_template_create_empty_items(self):
+        from app.schemas import KpiTemplateCreate
+        with pytest.raises(ValueError) as exc:
+            KpiTemplateCreate(position_id=1, items=[])
+        assert "指标列表不能为空" in str(exc.value)
+
+    def test_kpi_template_create_duplicate_names(self):
+        from app.schemas import KpiTemplateCreate, KpiItemCreate
+        from decimal import Decimal
+        with pytest.raises(ValueError) as exc:
+            KpiTemplateCreate(position_id=1, items=[
+                KpiItemCreate(name="指标A", weight=Decimal("60")),
+                KpiItemCreate(name="指标A", weight=Decimal("40")),
+            ])
+        assert "指标名称不能重复" in str(exc.value)
+
+    def test_kpi_template_create_weight_not_100(self):
+        from app.schemas import KpiTemplateCreate, KpiItemCreate
+        from decimal import Decimal
+        with pytest.raises(ValueError) as exc:
+            KpiTemplateCreate(position_id=1, items=[
+                KpiItemCreate(name="指标A", weight=Decimal("50")),
+                KpiItemCreate(name="指标B", weight=Decimal("40")),
+            ])
+        assert "权重总和必须等于100" in str(exc.value)
+
+    def test_kpi_template_update_empty_items(self):
+        from app.schemas import KpiTemplateUpdate
+        with pytest.raises(ValueError) as exc:
+            KpiTemplateUpdate(items=[])
+        assert "指标列表不能为空" in str(exc.value)
+
+    def test_kpi_template_update_weight_not_100(self):
+        from app.schemas import KpiTemplateUpdate, KpiItemCreate
+        from decimal import Decimal
+        with pytest.raises(ValueError) as exc:
+            KpiTemplateUpdate(items=[
+                KpiItemCreate(name="指标A", weight=Decimal("99")),
+            ])
+        assert "权重总和必须等于100" in str(exc.value)
+
+
 class TestConfigSmallDeptExemption:
     """Tests for GET/PUT /config/small-dept-exemption"""
 
@@ -207,14 +403,68 @@ class TestConfigSmallDeptExemption:
         assert resp.status_code == 200
         data = resp.json()
         assert "enabled" in data
+        assert isinstance(data["enabled"], bool)
         assert "threshold" in data
+        assert isinstance(data["threshold"], int)
 
     def test_update_small_dept_exemption_success(self, client: TestClient, admin_token):
         payload = {"enabled": True, "threshold": 10}
         resp = client.put("/config/small-dept-exemption", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
         assert resp.status_code == 200
         assert resp.json()["message"] == "小部门豁免配置已保存"
+        assert resp.json()["enabled"] is True
+        assert resp.json()["threshold"] == 10
+
+        # Persistence round-trip check
+        get_resp = client.get("/config/small-dept-exemption", headers={"Authorization": f"Bearer {admin_token}"})
+        data = get_resp.json()
+        assert data["enabled"] is True
+        assert data["threshold"] == 10
+
+    def test_update_small_dept_exemption_threshold_zero(self, client: TestClient, admin_token):
+        payload = {"enabled": True, "threshold": 0}
+        resp = client.put("/config/small-dept-exemption", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 422
+        assert "threshold 必须在 1-50 之间" in resp.json()["message"]
+
+    def test_update_small_dept_exemption_threshold_negative(self, client: TestClient, admin_token):
+        payload = {"enabled": True, "threshold": -1}
+        resp = client.put("/config/small-dept-exemption", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 422
+        assert "threshold 必须在 1-50 之间" in resp.json()["message"]
+
+    def test_update_small_dept_exemption_threshold_over_50(self, client: TestClient, admin_token):
+        payload = {"enabled": True, "threshold": 51}
+        resp = client.put("/config/small-dept-exemption", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 422
+        assert "threshold 必须在 1-50 之间" in resp.json()["message"]
+
+    def test_update_small_dept_exemption_threshold_not_int(self, client: TestClient, admin_token):
+        payload = {"enabled": True, "threshold": 5.5}
+        resp = client.put("/config/small-dept-exemption", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 422
+        assert "threshold 必须为整数" in resp.json()["message"]
+
+    def test_update_small_dept_exemption_threshold_bool(self, client: TestClient, admin_token):
+        payload = {"enabled": True, "threshold": True}
+        resp = client.put("/config/small-dept-exemption", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 422
+        assert "threshold 必须为整数" in resp.json()["message"]
+
+    def test_update_small_dept_exemption_enabled_not_bool(self, client: TestClient, admin_token):
+        payload = {"enabled": "yes", "threshold": 5}
+        resp = client.put("/config/small-dept-exemption", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 422
+        assert "enabled 必须为布尔值" in resp.json()["message"]
 
     def test_small_dept_exemption_unauthorized(self, client: TestClient, employee_token):
         resp = client.get("/config/small-dept-exemption", headers={"Authorization": f"Bearer {employee_token}"})
+        assert resp.status_code == 403
+
+    def test_update_small_dept_exemption_unauthorized(self, client: TestClient, hr_token):
+        resp = client.put(
+            "/config/small-dept-exemption",
+            json={"enabled": True, "threshold": 5},
+            headers={"Authorization": f"Bearer {hr_token}"},
+        )
         assert resp.status_code == 403
