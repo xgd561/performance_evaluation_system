@@ -94,11 +94,12 @@
 
 | 角色 | 首页核心内容 | 快捷操作入口 |
 |------|------------|------------|
-| **系统管理员** | 考核周期统计卡片、系统配置待办 | 创建考核周期、配置 KPI 模板、权限管理 |
-| **HR / 绩效专员** | 当前进行中的考核周期、待处理强制分布、待审批申诉 | 发起考核、查看汇总进度、处理申诉、导出报表 |
-| **部门负责人 / 直属上级** | 我的待评列表（下属人数/进度）、待审批绩效、待面谈提醒 | 批量评分、审批下属绩效、记录面谈 |
-| **跨部门协作人** | 我的协作评分待办（按被评人分组） | 快速进入评分页 |
-| **普通员工** | 我的当前考核状态（进度条）、历史绩效趋势图（近4周期） | 进入自评、查看历史绩效、发起申诉 |
+| **系统管理员 (admin)** | 考核周期统计卡片、系统配置待办 | 创建考核周期、配置 KPI 模板、权限管理 |
+| **HR 专员 (hr)** | 当前进行中的考核周期、待处理强制分布、待审批申诉 | 发起考核、查看汇总进度、处理申诉、导出报表 |
+| **部门经理 (manager)** | 我的待评列表（下属人数/进度）、待审批绩效、待面谈提醒 | 批量评分、审批下属绩效、记录面谈 |
+| **协作人 (peer)** | 我的协作评分待办（按被评人分组） | 快速进入评分页 |
+| **员工 (employee)** | 我的当前考核状态（进度条）、历史绩效趋势图（近4周期） | 进入自评、查看历史绩效、发起申诉 |
+| **高管 (executive)** | 全公司绩效分布、部门对比、趋势分析 | 查看仪表盘（只读） |
 
 #### 2.3.2 核心页面交互设计
 
@@ -118,7 +119,7 @@
   - 强制调整标记：被系统降级的行，等级列旁显示 🔴 红色图标，鼠标悬停显示「因 A 等级超限，由 A 强制降至 B」。
   - 异常分数标红：总分 <60 或 >98 的行，总分单元格背景淡红色。
 - **分布图联动**：表格上方显示部门等级分布饼图（原始 vs 调整后双环图），点击饼图区块自动筛选表格。
-- **批量操作**：HR 可选中多行，批量「导出 Excel」、「触发重新计算」、「申请特批」。
+- **批量操作**：HR 可选中多行，批量「导出 Excel」、「触发重新计算」。
 
 **（3）审批工作台（Approval Workbench）—— 管理者视角**
 - **待审批卡片列表**：每张卡片显示员工姓名、总分、等级、异常标记（🔴）、强制调整标记（🔴）。
@@ -137,19 +138,18 @@
 
 **（5）强制分布处理页（Distribution Review）—— HR 视角**
 - **超标部门列表**：左侧显示所有超标部门，红色高亮，含「部门名称 | 人数 | A 超标 X 人 | 操作」。
-- **智能调整预览**：点击部门后，右侧展示「调整前 vs 调整后」对比表格，可逐行勾选「确认降级」或「申请特批」。
-- **特批快速通道**：对于 95 分以上被降级者，右侧固定显示「特批候选人」快捷列表，一键发起特批申请。
+- **智能调整预览**：点击部门后，右侧展示「调整前 vs 调整后」对比表格，可逐行勾选「确认降级」。
 - **重新计算按钮**：HR 确认调整后，点击「重新计算并校验」，系统刷新分布状态，合规后自动解锁进入审批。
 
 
-**（7）员工批量导入页（Employee Import）—— HR 视角**
+**（6）员工批量导入页（Employee Import）—— HR 视角**
 - **三步引导式界面**：
   - Step 1「下载模板」：展示模板字段说明，提供「下载空模板」和「下载带示例模板」两个按钮。
   - Step 2「上传文件」：拖拽上传区域（支持 `.xlsx`），上传后显示文件解析进度条。
   - Step 3「预览与确认」：表格展示解析结果，错误行标红并显示具体错误（如「第5行：工号 EMP003 已存在」），HR 可在线编辑修正或下载错误报告。确认无误后点击「确认导入」。
 - **导入结果弹窗**：显示成功/失败数量，提供「下载错误报告」和「查看导入员工」按钮。
 
-**（6）绩效面谈页（Interview）—— 上级视角**
+**（7）绩效面谈页（Interview）—— 上级视角**
 - **待面谈列表**：显示已通过审批的下属，按面谈预约时间排序。
 - **面谈记录表单**：员工信息（只读）、面谈时间（日期选择器）、面谈地点、沟通内容（富文本）、改进计划（C/D 等级必填，字数 ≥50）。
 - **历史面谈关联**：下方折叠面板显示该员工历次面谈记录，供上级参考。
@@ -188,8 +188,8 @@
        │                           │ M:N
        ▼                           ▼
 ┌─────────────────┐       ┌─────────────────┐
-│   AssessmentCycle│ 1:M  │  KpiAdjustment  │
-│  (考核周期)      │───────│  (KPI调整申请)   │
+│   AssessmentCycle│ 1:M  │  PeerReviewer   │
+│  (考核周期)      │───────│  (协作评分关系)   │
 └─────────────────┘       └─────────────────┘
        │                           │
        │ 1:M                       │ 1:M
@@ -289,8 +289,10 @@ CREATE TABLE assessment_records (
     
     -- 各评分人原始分 (JSON)
     self_scores         TEXT,                        -- {"performance":85,"ability":90,"attitude":88}
+    self_facts          TEXT,                        -- JSON: {"performance":"主导完成XX项目","ability":"自学Vue 3","attitude":"主动承担周末值班"}
     manager_scores      TEXT,                        -- 上级评分
     peer_scores         TEXT,                        -- 协作评分
+    peer_comments       TEXT,                        -- JSON: [{"reviewer_name":"赵晓峰","ability_score":86,"comment":"需求评审响应及时..."}]
     
     -- 加权后维度得分
     weighted_performance DECIMAL(5,2),               -- 业绩加权分
@@ -298,9 +300,7 @@ CREATE TABLE assessment_records (
     weighted_attitude    DECIMAL(5,2),               -- 态度加权分
     total_score          DECIMAL(5,2),                -- 总分
     grade                VARCHAR(10),                -- A/B/C/D（强制调整后的最终等级）
-    original_grade       VARCHAR(10),                -- 强制调整前的原始等级（用于追溯与特批）
-    is_distribution_override BOOLEAN DEFAULT FALSE,   -- 是否通过特批打破强制分布
-    override_reason      TEXT,                        -- 特批理由
+    original_grade       VARCHAR(10),                -- 强制调整前的原始等级（用于追溯）
     
     manager_comment     TEXT,                        -- 上级综合评语
     interview_record    TEXT,                        -- JSON: 面谈记录
@@ -327,48 +327,36 @@ CREATE TABLE score_details (
 );
 ```
 
-#### 3.2.8 `kpi_adjustments` — KPI 调整申请表
-```sql
-CREATE TABLE kpi_adjustments (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    record_id       INTEGER NOT NULL,              -- 考核记录ID
-    original_kpi    TEXT NOT NULL,                 -- 调整前KPI快照
-    adjusted_kpi    TEXT NOT NULL,                 -- 调整后KPI快照
-    reason          TEXT NOT NULL,                 -- 调整理由
-    status          VARCHAR(50) DEFAULT 'pending', -- 审批状态
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-#### 3.2.9 `approval_records` — 审批记录表
+#### 3.2.8 `approval_records` — 审批记录表
 ```sql
 CREATE TABLE approval_records (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     record_id       INTEGER NOT NULL,              -- 考核记录ID
     approver_id     INTEGER NOT NULL,              -- 审批人ID
-    approver_role   VARCHAR(50),                    -- 审批角色：direct_manager/dept_head/hr_head/admin
-    step_index      INTEGER DEFAULT 1,              -- 审批链中的第几步（1=直属上级, 2=部门负责人, 3=HR）
-    approval_type   VARCHAR(50) DEFAULT 'normal',  -- normal（正常审批）/ distribution_override（强制分布特批）
+    approver_role   VARCHAR(50),                    -- 审批角色：direct_manager/hr_head
+    step_index      INTEGER DEFAULT 1,              -- 审批链中的第几步（1=直属上级, 2=HR负责人）
     action          VARCHAR(50),                    -- 通过/驳回/打回
     comment         TEXT,                          -- 审批意见
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-#### 3.2.10 `users` — 系统用户表（登录账号）
+
+#### 3.2.9 `users` — 系统用户表（登录账号）
 ```sql
 CREATE TABLE users (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    username    VARCHAR(100) UNIQUE NOT NULL,       -- 登录名
-    password_hash VARCHAR(255) NOT NULL,           -- 哈希密码(bcrypt)
-    role        VARCHAR(50) NOT NULL,              -- admin/hr/manager/employee
+    username    VARCHAR(100) UNIQUE NOT NULL,       -- 登录名：拼音 + 6位工号（如 zhangxiguan010001）
+    password_hash VARCHAR(255) NOT NULL,           -- 哈希密码(bcrypt)，默认密码 = 工号 + @123
+    role        VARCHAR(50) NOT NULL,              -- admin/hr/manager/employee/peer/executive
+    role_code   VARCHAR(10),                       -- 角色编码：01=admin, 02=hr, 03=manager, 04=employee, 05=peer, 06=executive
     employee_id INTEGER,                           -- 关联员工ID
     is_active   BOOLEAN DEFAULT TRUE,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-#### 3.2.11 `cycle_employees` — 考核周期参与人员表
+#### 3.2.10 `cycle_employees` — 考核周期参与人员表
 
 用于明确记录哪些员工被纳入本次考核，支持中途增删和状态跟踪。
 
@@ -383,7 +371,7 @@ CREATE TABLE cycle_employees (
 );
 ```
 
-#### 3.2.12 `peer_reviewers` — 协作评分关系表
+#### 3.2.11 `peer_reviewers` — 协作评分关系表
 
 定义跨部门协作评分关系，支持一个员工被多人协作评分。
 
@@ -399,7 +387,7 @@ CREATE TABLE peer_reviewers (
 );
 ```
 
-#### 3.2.13 `operation_logs` — 操作日志表
+#### 3.2.12 `operation_logs` — 操作日志表
 
 记录所有敏感操作，满足审计追溯要求。
 
@@ -407,8 +395,8 @@ CREATE TABLE peer_reviewers (
 CREATE TABLE operation_logs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER NOT NULL,              -- 操作用户ID
-    action      VARCHAR(100) NOT NULL,         -- 操作类型：approve, reject, score_submit, grade_override, kpi_adjust...
-    target_type VARCHAR(50),                   -- 操作对象类型：assessment_record, approval, kpi_adjustment...
+    action      VARCHAR(100) NOT NULL,         -- 操作类型：approve, reject, score_submit, grade_override, distribution_review...
+    target_type VARCHAR(50),                   -- 操作对象类型：assessment_record, approval, appeal_record...
     target_id   INTEGER,                       -- 操作对象ID
     old_value   TEXT,                          -- 变更前快照（JSON）
     new_value   TEXT,                          -- 变更后快照（JSON）
@@ -417,7 +405,7 @@ CREATE TABLE operation_logs (
 );
 ```
 
-#### 3.2.14 `appeal_records` — 申诉记录表（独立表）
+#### 3.2.13 `appeal_records` — 申诉记录表（独立表）
 
 从 `assessment_records` 中剥离，支持独立查询和状态跟踪。
 
@@ -436,7 +424,7 @@ CREATE TABLE appeal_records (
 );
 ```
 
-#### 3.2.15 `interview_records` — 面谈记录表（独立表）
+#### 3.2.14 `interview_records` — 面谈记录表（独立表）
 
 从 `assessment_records` 中剥离，支持面谈历史独立查询。
 
@@ -517,10 +505,6 @@ CREATE TABLE interview_records (
 | POST | `/approvals/{record_id}/approve` | 通过 | 审批人 |
 | POST | `/approvals/{record_id}/reject` | 驳回 | 审批人 |
 | POST | `/approvals/{record_id}/rollback` | 打回重评 | 审批人 |
-| POST | `/approvals/{record_id}/distribution-override` | 申请强制分布特批 | manager |
-| GET | `/approvals/distribution-overrides` | 强制分布特批列表 | admin/hr |
-| POST | `/approvals/distribution-overrides/{id}/approve` | 特批审批通过 | admin/hr |
-| POST | `/approvals/distribution-overrides/{id}/reject` | 特批审批驳回 | admin/hr |
 
 #### 报表分析
 | 方法 | 路径 | 说明 | 权限 |
@@ -594,14 +578,6 @@ CREATE TABLE interview_records (
 | POST | `/approvals/{record_id}/reassign` | 重新指派审批人 | hr |
 | POST | `/scores/{record_id}/reassign-reviewer` | 重新指派评分人 | hr |
 
-#### KPI 调整审批
-| 方法 | 路径 | 说明 | 权限 |
-|------|------|------|------|
-| GET | `/kpi-adjustments/pending` | 待审批KPI调整 | admin/hr/dept_head |
-| POST | `/kpi-adjustments/{id}/approve` | 通过KPI调整 | admin/hr/dept_head |
-| POST | `/kpi-adjustments/{id}/reject` | 驳回KPI调整 | admin/hr/dept_head |
-| GET | `/kpi-adjustments/record/{record_id}` | KPI调整历史 | manager/hr |
-
 #### 系统配置
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
@@ -613,7 +589,8 @@ CREATE TABLE interview_records (
 | PUT | `/config/reviewer-weights` | 更新评分人权重 | admin |
 | GET | `/config/small-dept-exemption` | 获取小部门豁免配置 | admin |
 | PUT | `/config/small-dept-exemption` | 更新小部门豁免配置 | admin |
-
+| GET | `/config/peer-review-enabled` | 获取协作评分开关全局默认值 | admin |
+| PUT | `/config/peer-review-enabled` | 更新协作评分开关全局默认值 | admin |
 #### 首页仪表盘与统计
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
@@ -640,7 +617,7 @@ CREATE TABLE interview_records (
 | GET | `/kpi-templates` | 模板列表 | admin |
 | POST | `/kpi-templates` | 新增模板 | admin |
 | PUT | `/kpi-templates/{id}` | 修改模板 | admin |
-| POST | `/kpi-templates/{record_id}/adjust` | 申请调整 | manager |
+| DELETE | `/kpi-templates/{id}` | 删除模板 | admin |
 
 ---
 
@@ -728,9 +705,9 @@ def detect_anomalies(record: AssessmentRecord) -> list:
 ### 5.4 考核状态机（完整版，含异常处理）
 
 ```
-not_started → pending_self → pending_manager → pending_peer →
-pending_summary → pending_distribution_review → [pending_distribution_override_review] →
-pending_approval → published → [appealed → appeal_reviewed] → archived
+not_started → pending_self → pending_manager → pending_peer（可选） →
+pending_summary → pending_distribution_review（可选） →
+pending_approval → pending_interview → published → [appealed] → archived
 
 异常分支:
 • 任何活跃状态 → cancelled (管理员取消考核)
@@ -748,11 +725,9 @@ pending_approval → published → [appealed → appeal_reviewed] → archived
 | 所有评分截止 | `pending_peer` | `pending_summary` | 系统 | 超时自动跳过未提交者，标记为 skipped |
 | HR 触发汇总 | `pending_summary` | `pending_distribution_review` | HR | 系统执行加权计算 + 等级映射 |
 | 强制分布合规 | `pending_distribution_review` | `pending_approval` | 系统 | 自动通过，无需人工干预 |
-| 强制分布不合规 + HR 确认智能调整 | `pending_distribution_review` | `pending_approval` | HR | HR 确认系统推荐的降级方案 |
-| 强制分布不合规 + 发起特批 | `pending_distribution_review` | `pending_distribution_override_review` | HR/上级 | 提交特批申请，进入三级审批 |
-| 特批审批通过 | `pending_distribution_override_review` | `pending_approval` | 系统管理员/总经理 | 保留原始等级，记录特批理由 |
-| 特批审批驳回 | `pending_distribution_override_review` | `pending_distribution_review` | 系统管理员/总经理 | HR 必须重新调整或再次申请 |
-| 审批链全部通过 | `pending_approval` | `published` | 系统 | 最后一级审批人通过后自动发布 |
+| 强制分布不合规 + HR 确认调整 | `pending_distribution_review` | `pending_approval` | HR | HR 确认系统推荐的降级方案 |
+| 审批链 Step 1 通过 | `pending_approval` | `pending_approval` | 直属上级 | Step 1 确认后进入 Step 2 |
+| 审批链 Step 2 通过 | `pending_approval` | `pending_interview` | HR 负责人 | 最终审批通过，进入面谈阶段 |
 | 审批驳回 | `pending_approval` | `pending_manager` | 审批人 | 返回上级修改评分，保留历史审批记录 |
 | 审批打回重评 | `pending_approval` | `pending_self` | 审批人 | 清除所有评分数据，考核回到自评阶段 |
 | HR 发布归档 | `published` | `archived` | HR | 数据锁定，生成 PDF 档案 |
@@ -765,11 +740,9 @@ pending_approval → published → [appealed → appeal_reviewed] → archived
 | **自评超时** | `pending_self` | 系统提醒 → 员工仍未提交 | `pending_self` (overdue标记) | HR 可手动关闭该员工的自评（标记为 skipped），强制流转至 `pending_manager` |
 | **上级评超时** | `pending_manager` | 截止日后上级未提交 | `pending_manager` (overdue标记) | HR 可手动指派代理人或跳过该上级评分 |
 | **协作评超时** | `pending_peer` | 截止日后协作人未提交 | `pending_summary` | 系统自动跳过该协作人评分，权重按比例分配给已提交者 |
-| **KPI 调整申请中** | `pending_self` / `pending_manager` | 上级提交 KPI 调整 | `kpi_adjustment_pending` | 考核暂停，待审批通过后恢复原状态并更新 KPI 快照 |
 | **申诉发起** | `published` | 员工发起申诉 | `appealed` | 锁定已发布结果，HR 复核期间不可修改 |
 | **申诉复核通过** | `appealed` | HR 维持原结果 | `published` | 结果不变，记录申诉驳回 |
 | **申诉复核修改** | `appealed` | HR 修改结果 | `published` | 更新等级/分数，记录修改原因，通知员工 |
-| **强制分布手动调整仍不合规** | `pending_distribution_review` | HR 多次调整仍无法合规 | `pending_distribution_review` | 系统不允许进入 `pending_approval`，必须完成特批或调整至合规 |
 | **审批人离职/休假** | `pending_approval` | 原审批人无法处理 | `pending_approval` | HR 可手动重新指派审批人（需记录指派日志） |
 
 ### 5.5 强制分布校验与调整算法
@@ -818,18 +791,12 @@ def enforce_distribution(records, grade_rules, dept_size):
                         "reason": f"因{grade}等级超限（上限{caps[grade]}人），系统自动降级"
                     })
     
-    override_candidates = [
-        log for log in adjustment_log 
-        if log["from_grade"] == "A" and log["total_score"] >= 90
-    ]
-    
     final_counts = Counter(r.grade for r in sorted_records)
     is_compliant = all(final_counts.get(g, 0) <= caps.get(g, 0) for g in caps)
     
     return {
         "adjusted_records": sorted_records,
         "adjustment_log": adjustment_log,
-        "override_candidates": override_candidates,
         "is_compliant": is_compliant
     }
 
@@ -852,8 +819,8 @@ def _get_next_lower_grade(grade):
 1. **按部门独立核算**：以 `department_id` 为维度分组统计。
 2. **小部门豁免**：部门人数 ≤5 时，仅限制 A 和 D 各不超过 1 人，B/C 不限制。
 3. **溢出降级策略**：从超限等级中按「总分由低到高」依次降级，确保高分者尽可能保留原等级。
-4. **原始等级保留**：所有被强制调整的记录，系统自动在 `original_grade` 中保留调整前等级，用于审计和特批。
-5. **特批候选人**：被从 A 强制降级且总分仍 ≥90 的员工，系统自动标记为 `override_candidates`，供审批人快速定位。
+4. **原始等级保留**：所有被强制调整的记录，系统自动在 `original_grade` 中保留调整前等级，用于审计追溯。
+5. **降级日志**：每次降级操作记录详细日志，包含员工ID、总分、原始等级、调整后等级、降级原因，供审计追溯。
 
 
 ---
@@ -862,22 +829,23 @@ def _get_next_lower_grade(grade):
 
 ### 6.1 角色权限矩阵 (RBAC)
 
-| 功能 | admin | hr | manager | employee | peer |
-|------|-------|----|---------|----------|------|
-| 系统配置 (权重/等级规则) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| 员工管理 | ✅ | ✅ | ❌ | ❌ | ❌ |
-| 发起考核 | ✅ | ✅ | ❌ | ❌ | ❌ |
-| 查看全公司汇总 | ✅ | ✅ | ❌ | ❌ | ❌ |
-| 查看部门汇总 | ✅ | ✅ | ✅ | ❌ | ❌ |
-| 查看下属绩效 | ✅ | ✅ | ✅ | ❌ | ❌ |
-| 查看本人绩效 | ✅ | ✅ | ✅ | ✅ | ❌ |
-| 自评 | ❌ | ❌ | ❌ | ✅ | ❌ |
-| 上级评分 | ❌ | ❌ | ✅ | ❌ | ❌ |
-| 协作评分 | ❌ | ❌ | ❌ | ❌ | ✅ |
-| 审批 | ❌ | ❌ | ✅ | ❌ | ❌ |
-| 申诉 | ❌ | ❌ | ❌ | ✅ | ❌ |
-| 申诉复核 | ❌ | ✅ | ❌ | ❌ | ❌ |
-| 导出报表 | ✅ | ✅ | ❌ | ❌ | ❌ |
+| 功能 | admin (01) | hr (02) | manager (03) | employee (04) | peer (05) | executive (06) |
+|------|:----------:|:-------:|:------------:|:-------------:|:---------:|:--------------:|
+| 系统配置 (权重/等级规则) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| 员工管理 | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 发起考核 | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 查看全公司汇总 | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
+| 查看部门汇总 | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| 查看下属绩效 | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| 查看本人绩效 | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| 自评 | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| 上级评分 | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| 协作评分 | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| 审批 | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| 申诉 | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| 申诉复核 | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 导出报表 | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 高管仪表盘查看 | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 ### 6.2 数据隔离规则
 - 员工只能查看 `employee_id` 等于本人的记录。
@@ -912,11 +880,18 @@ performance_evaluation_system/
 │   │   │   ├── __init__.py
 │   │   │   ├── auth.py             # 登录认证
 │   │   │   ├── employees.py        # 员工管理
+│   │   │   ├── departments.py      # 部门与岗位管理
 │   │   │   ├── cycles.py           # 考核周期
 │   │   │   ├── scores.py           # 评分管理
 │   │   │   ├── approvals.py        # 审批流程
+│   │   │   ├── appeals.py          # 申诉管理
+│   │   │   ├── interviews.py       # 绩效面谈
+│   │   │   ├── peers.py            # 协作评分
 │   │   │   ├── reports.py          # 报表分析
-│   │   │   └── kpi_templates.py    # KPI模板
+│   │   │   ├── kpi_templates.py    # KPI模板
+│   │   │   ├── config.py           # 系统配置
+│   │   │   ├── dashboard.py        # 仪表盘
+│   │   │   └── logs.py             # 操作日志
 │   │   ├── services/               # 业务逻辑层
 │   │   │   ├── __init__.py
 │   │   │   ├── score_calculator.py # 加权计算算法
@@ -951,15 +926,19 @@ performance_evaluation_system/
 │   │   │   ├── login/              # 登录页
 │   │   │   ├── dashboard/          # 角色仪表盘（按角色渲染不同内容）
 │   │   │   ├── employees/          # 员工管理
+│   │   │   ├── departments/        # 部门与岗位管理
 │   │   │   ├── cycles/             # 考核周期管理
+│   │   │   ├── kpi-templates/      # KPI模板管理
+│   │   │   ├── config/             # 系统配置
 │   │   │   ├── score-sheet/        # 评分页（自评/上级评/协作评）
 │   │   │   ├── my-performance/     # 我的绩效（历史趋势/档案/申诉）
 │   │   │   ├── summary/            # 分数汇总与强制分布处理
-│   │   │   ├── approval-workbench/ # 审批工作台（待审批/已审批/特批）
+│   │   │   ├── distribution-review/ # 强制分布处理（HR专用）
+│   │   │   ├── approval-workbench/ # 审批工作台（待审批/已审批）
 │   │   │   ├── peer-review/        # 协作评分待办
 │   │   │   ├── interview/          # 绩效面谈记录
 │   │   │   ├── appeal/             # 申诉提交与跟踪
-│   │   │   ├── distribution-review/ # 强制分布处理（HR专用）
+│   │   │   ├── audit/              # 操作日志审计
 │   │   │   ├── reports/            # 报表分析（分布图/趋势图/导出）
 │   │   │   └── admin/              # 系统配置（权重/等级规则/KPI模板）
 │   │   ├── App.vue
@@ -1088,7 +1067,7 @@ npm run dev
 | 前后端联调问题 | 接口不一致 | 使用 FastAPI 自动生成的 Swagger 文档 (`/docs`) 作为接口契约 |
 | 复杂报表导出性能 | 大数据量导出慢 | MVP 数据量有限，导出采用流式生成；后续可引入异步任务队列 |
 | 考核状态机 bug | 状态流转错误导致流程卡住 | 状态流转封装为统一函数，写状态变更日志，支持管理员手动干预 |
-| 强制分布降级引发争议 | 高分员工被系统强制降级（如 95 分从 A 降至 B），员工对结果不满 | 保留 `original_grade` 完整审计链；提供「特批恢复」流程；面谈时由上级解释降级原因 |
+| 强制分布降级引发争议 | 高分员工被系统强制降级（如 95 分从 A 降至 B），员工对结果不满 | 保留 `original_grade` 完整审计链；面谈时由上级解释降级原因；支持申诉复核 |
 
 ---
 
