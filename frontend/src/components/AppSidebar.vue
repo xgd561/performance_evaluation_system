@@ -1,5 +1,11 @@
 <template>
   <div class="app-sidebar">
+    <div v-if="!appStore.sidebarCollapsed" class="sidebar-logo">
+      <span>绩效考核系统</span>
+    </div>
+    <div v-else class="sidebar-logo collapsed">
+      <span>绩效</span>
+    </div>
     <el-menu
       :default-active="activePath"
       :collapse="appStore.sidebarCollapsed"
@@ -46,6 +52,22 @@ const menuItems = computed(() => {
 .app-sidebar {
   height: 100%;
   background-color: #304156;
+}
+
+.sidebar-logo {
+  height: 56px;
+  line-height: 56px;
+  text-align: center;
+  color: #fff;
+  font-size: 18px;
+  font-weight: bold;
+  border-bottom: 1px solid #1f2d3d;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar-logo.collapsed {
+  font-size: 14px;
 }
 
 .app-sidebar :deep(.el-menu) {

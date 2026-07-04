@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ValidationError
 from typing import Optional, List, Dict, Any
 from decimal import Decimal
 from datetime import date, datetime
@@ -312,6 +312,14 @@ class AssessmentRecordOut(BaseModel):
     grade: Optional[str]
     created_at: Optional[datetime]
 
+    @model_validator(mode='after')
+    def mask_unpublished_scores(self):
+        """未发布状态的考核记录不返回 total_score 和 grade。"""
+        if self.status not in ("published", "archived"):
+            self.total_score = None
+            self.grade = None
+        return self
+
     class Config:
         from_attributes = True
 
@@ -334,11 +342,59 @@ class KpiAdjustmentOut(BaseModel):
         from_attributes = True
 
 # ------------------ System Config ------------------
-class GradeRulesConfig(BaseModel):
-    A: Dict[str, Any]
-    B: Dict[str, Any]
-    C: Dict[str, Any]
-    D: Dict[str, Any]
+class GradeRuleEntry(BaseModel):
+    min: float = Field(..., ge=0, le=100, description="等级最低分")
+    max: float = Field(..., ge=0, le=100, description="等级最高分")
+    ratio_limit: float = Field(..., ge=0, le=1, description="等级人数上限比例，0-1之间")
+
+    @model_validator(mode='after')
+    def check_min_less_than_max(self):
+        if self.min >= self.max:
+            raise ValueError(f"min({self.min})必须小于max({self.max})")
+        return self
+
+
+class GradeRulesSchema(BaseModel):
+    A: GradeRuleEntry
+    B: GradeRuleEntry
+    C: GradeRuleEntry
+    D: GradeRuleEntry
+
+    @model_validator(mode='after')
+    def check_intervals(self):
+        entries = [("A", self.A), ("B", self.B), ("C", self.C), ("D", self.D)]
+        sorted_entries = sorted(entries, key=lambda x: x[1].min)
+
+        # Check full coverage
+        lowest_min = min(entry.min for _, entry in entries)
+        highest_max = max(entry.max for _, entry in entries)
+        if lowest_min > 0:
+            raise ValueError("最低等级min必须等于0")
+        if highest_max < 100:
+            raise ValueError("最高等级max必须等于100")
+
+        # Check no overlap and continuity
+        for i in range(len(sorted_entries) - 1):
+            curr_name, curr = sorted_entries[i]
+            next_name, next_ = sorted_entries[i + 1]
+            if curr.max > next_.min:
+                raise ValueError(f"区间重叠: {curr_name} 与 {next_name}")
+            # Allow small gap up to 1.0 for integer/decimal boundaries
+            if next_.min > curr.max + 1:
+                raise ValueError(f"区间不连续: {curr_name}({curr.max}) 与 {next_name}({next_.min})")
+
+        return self
+
+    @model_validator(mode='after')
+    def check_ratio_limit(self):
+        total = sum(entry.ratio_limit for _, entry in [("A", self.A), ("B", self.B), ("C", self.C), ("D", self.D)])
+        if total > 1.0:
+            raise ValueError(f"ratio_limit合计不能超过100%，当前为{total * 100:.0f}%")
+        return self
+
+
+class GradeRulesConfig(GradeRulesSchema):
+    pass
 
 class DimensionWeightsConfig(BaseModel):
     performance: Optional[int] = None
@@ -355,17 +411,29 @@ class DimensionWeightsConfig(BaseModel):
             raise ValueError("权重不能为负数")
         return v
 
-class ReviewerWeightsConfig(BaseModel):
-    self: Optional[int] = None
-    manager: Optional[int] = None
-    peer: Optional[int] = None
+class ReviewerWeightEntry(BaseModel):
+    self: int = Field(..., ge=0, le=100, description="自评权重")
+    manager: int = Field(..., ge=0, le=100, description="上级权重")
+    peer: int = Field(..., ge=0, le=100, description="协作权重")
 
-    @field_validator('*')
-    @classmethod
-    def check_positive(cls, v):
-        if v is not None and v < 0:
-            raise ValueError("权重不能为负数")
-        return v
+    @model_validator(mode='after')
+    def check_sum(self):
+        total = self.self + self.manager + self.peer
+        if total != 100:
+            raise ValueError(f"评分人权重总和必须等于100%，当前为{total}%")
+        return self
+
+class ReviewerWeightsConfig(BaseModel):
+    performance: Optional[ReviewerWeightEntry] = None
+    ability: Optional[ReviewerWeightEntry] = None
+    attitude: Optional[ReviewerWeightEntry] = None
+
+    @model_validator(mode='after')
+    def check_all_dimensions_present(self):
+        for dim in ['performance', 'ability', 'attitude']:
+            if getattr(self, dim) is None:
+                raise ValueError(f"缺少维度: {dim}")
+        return self
 
 class SmallDeptExemptionConfig(BaseModel):
     enabled: bool

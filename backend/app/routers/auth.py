@@ -87,6 +87,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
             "role": user.role,
             "name": user.employee.name if user.employee else user.username,
             "employee_id": user.employee_id,
+            "is_first_login": user.is_first_login,
         },
     }
     return result
@@ -160,7 +161,7 @@ def change_password(
         target_id=user.id,
     )
 
-    return {"code": 200, "message": "密码修改成功"}
+    return {"code": 0, "message": "密码修改成功"}
 
 
 @router.post("/change-password")
@@ -174,4 +175,4 @@ def change_password_post(
 
 @router.post("/logout")
 def logout(user: User = Depends(get_current_user)):
-    return {"code": 200, "message": "退出成功"}
+    return {"code": 0, "message": "退出成功"}

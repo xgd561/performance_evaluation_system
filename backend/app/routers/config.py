@@ -6,7 +6,7 @@ from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import SystemConfig
 from app.schemas import (
-    GradeRulesConfig,
+    GradeRulesSchema,
     DimensionWeightsConfig,
     ReviewerWeightsConfig,
     SmallDeptExemptionConfig,
@@ -35,10 +35,10 @@ def get_grade_rules(
     cfg = _get_or_create_config(
         db, "grade_rules",
         json.dumps({
-            "A": {"min": 90, "max": 100},
-            "B": {"min": 80, "max": 89.9},
-            "C": {"min": 60, "max": 79.9},
-            "D": {"min": 0, "max": 59.9},
+            "A": {"min": 90, "max": 100, "ratio_limit": 0.2},
+            "B": {"min": 80, "max": 89.9, "ratio_limit": 0.5},
+            "C": {"min": 60, "max": 79.9, "ratio_limit": 0.25},
+            "D": {"min": 0, "max": 59.9, "ratio_limit": 0.05},
         })
     )
     return json.loads(cfg.value)
@@ -52,40 +52,43 @@ def update_grade_rules(
 ):
     # Normalize input to detailed format
     parsed = {}
+    default_ratio_limits = {"A": 0.2, "B": 0.5, "C": 0.25, "D": 0.05}
     for grade, g_data in req.items():
         if isinstance(g_data, dict):
-            parsed[grade] = g_data
+            parsed[grade] = {
+                "min": g_data.get("min", 0),
+                "max": g_data.get("max", 100),
+                "ratio_limit": g_data.get("ratio_limit", default_ratio_limits.get(grade, 0)),
+            }
         elif isinstance(g_data, (int, float)):
-            if grade == "A":
-                parsed[grade] = {"min": g_data, "max": 100}
-            elif grade == "B":
-                parsed[grade] = {"min": g_data, "max": 89.9}
-            elif grade == "C":
-                parsed[grade] = {"min": g_data, "max": 79.9}
-            elif grade == "D":
-                parsed[grade] = {"min": g_data, "max": 59.9}
-            else:
-                parsed[grade] = {"min": g_data, "max": 100}
+            max_defaults = {"A": 100, "B": 89.9, "C": 79.9, "D": 59.9}
+            parsed[grade] = {
+                "min": g_data,
+                "max": max_defaults.get(grade, 100),
+                "ratio_limit": default_ratio_limits.get(grade, 0),
+            }
         else:
-            parsed[grade] = {"min": 0, "max": 100}
+            parsed[grade] = {"min": 0, "max": 100, "ratio_limit": 0}
 
-    # Validate no overlapping ranges
-    grades = [(parsed.get("A"), "A"), (parsed.get("B"), "B"), (parsed.get("C"), "C"), (parsed.get("D"), "D")]
-    for i in range(len(grades)):
-        for j in range(i + 1, len(grades)):
-            g1, n1 = grades[i]
-            g2, n2 = grades[j]
-            if not g1 or not g2:
-                continue
-            min1, max1 = g1.get("min", 0), g1.get("max", 0)
-            min2, max2 = g2.get("min", 0), g2.get("max", 0)
-            if not (max1 < min2 or max2 < min1):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"等级规则区间重叠: {n1} 与 {n2}",
-                )
+    # Ensure all grades A, B, C, D are present
+    for grade in ["A", "B", "C", "D"]:
+        if grade not in parsed:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"缺少等级规则: {grade}",
+            )
+
+    # Validate with Pydantic schema
+    try:
+        GradeRulesSchema.model_validate(parsed)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        )
 
     cfg = _get_or_create_config(db, "grade_rules", "{}")
+    old_value = json.loads(cfg.value) if cfg.value else {}
     cfg.value = json.dumps(parsed)
     db.commit()
 
@@ -95,6 +98,7 @@ def update_grade_rules(
         action="update_grade_rules",
         target_type="system_config",
         target_id=cfg.id,
+        old_value={"grade_rules": old_value},
         new_value={"grade_rules": parsed},
     )
 
@@ -168,7 +172,11 @@ def get_reviewer_weights(
 ):
     cfg = _get_or_create_config(
         db, "reviewer_weights",
-        json.dumps({"self": 30, "manager": 60, "peer": 10})
+        json.dumps({
+            "performance": {"self": 30, "manager": 70, "peer": 0},
+            "ability": {"self": 20, "manager": 60, "peer": 20},
+            "attitude": {"self": 10, "manager": 50, "peer": 40}
+        })
     )
     data = json.loads(cfg.value)
     return data
@@ -180,17 +188,26 @@ def update_reviewer_weights(
     db: Session = Depends(get_db),
     user = Depends(require_role("admin")),
 ):
-    data = {k: v for k, v in req.items() if v is not None and isinstance(v, (int, float))}
+    data = {k: v for k, v in req.items() if k in ("performance", "ability", "attitude") and isinstance(v, dict)}
 
-    total = sum(data.values())
-    if total != 100:
+    for dim in ["performance", "ability", "attitude"]:
+        if dim not in data:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"缺少维度: {dim}",
+            )
+
+    try:
+        validated = ReviewerWeightsConfig.model_validate(data)
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"评分人权重总和必须等于100%，当前为{total}%",
+            detail=str(e),
         )
 
     cfg = _get_or_create_config(db, "reviewer_weights", "{}")
-    cfg.value = json.dumps(data)
+    old_value = json.loads(cfg.value) if cfg.value else {}
+    cfg.value = json.dumps(validated.model_dump())
     db.commit()
 
     log_operation(
@@ -199,7 +216,8 @@ def update_reviewer_weights(
         action="update_reviewer_weights",
         target_type="system_config",
         target_id=cfg.id,
-        new_value={"reviewer_weights": data},
+        old_value={"reviewer_weights": old_value},
+        new_value={"reviewer_weights": validated.model_dump()},
     )
 
     return {"code": 200, "message": "评分人权重已更新"}

@@ -18,7 +18,8 @@ class TestAuthLogin:
         assert isinstance(data["refresh_token"], str) and len(data["refresh_token"]) > 10
         assert "id" in data["user"]
         assert "employee_id" in data["user"], "login 返回必须包含 employee_id，前端 my-performance 依赖此字段"
-        assert "name" in data["user"], "login 返回必须包含 name"
+        assert "is_first_login" in data["user"], "login 返回必须包含 is_first_login，前端首次登录弹窗依赖此字段"
+        assert data["user"]["is_first_login"] is False
 
     def test_login_invalid_password(self, client: TestClient, admin_user):
         resp = client.post("/auth/login", json={"username": "admin", "password": "wrongpassword"})
@@ -42,6 +43,14 @@ class TestAuthLogin:
     def test_login_missing_fields(self, client: TestClient):
         resp = client.post("/auth/login", json={"username": ""})
         assert resp.status_code == 422
+
+    def test_login_first_login_user(self, client: TestClient, employee_user):
+        resp = client.post("/auth/login", json={"username": "emp001", "password": "Emp001@123"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["user"]["is_first_login"] is True
+        assert data["user"]["role"] == "employee"
+        assert data["user"]["name"] == "王员工"
 
     def test_login_remember_me(self, client: TestClient, admin_user):
         resp = client.post("/auth/login", json={"username": "admin", "password": "admin123", "remember_me": True})

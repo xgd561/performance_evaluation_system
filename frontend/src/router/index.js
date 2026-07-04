@@ -1,11 +1,17 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
-const routes = [
+export const routes = [
   {
     path: '/login',
     name: 'Login',
     component: () => import('@/views/login/LoginView.vue'),
+    meta: { public: true },
+  },
+  {
+    path: '/403',
+    name: 'Forbidden',
+    component: () => import('@/views/error/403.vue'),
     meta: { public: true },
   },
   {
@@ -36,27 +42,33 @@ const routes = [
       { path: 'appeal', name: 'Appeal', component: () => import('@/views/appeal/AppealView.vue'), meta: { roles: ['employee'] } },
     ],
   },
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/403',
+  },
 ]
 
-const router = createRouter({
-  history: createWebHistory(),
-  routes,
-})
-
-router.beforeEach((to, from, next) => {
+export function beforeEachGuard(to, from, next) {
   const authStore = useAuthStore()
   if (!to.meta.public && !authStore.token) {
     next('/login')
     return
   }
   // 路由权限校验
-  if (to.meta.roles && authStore.user) {
-    if (!to.meta.roles.includes(authStore.user.role)) {
-      next('/dashboard')
+  if (to.meta.roles && authStore.role) {
+    if (!to.meta.roles.includes(authStore.role)) {
+      next('/403')
       return
     }
   }
   next()
+}
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
 })
+
+router.beforeEach(beforeEachGuard)
 
 export default router

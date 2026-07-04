@@ -4,7 +4,8 @@ export const ROLES = {
   HR: 'hr',
   MANAGER: 'manager',
   EMPLOYEE: 'employee',
-  PEER: 'peer'
+  PEER: 'peer',
+  EXECUTIVE: 'executive'
 }
 
 // 考核状态枚举
@@ -79,44 +80,57 @@ export const ROLE_TEXT = {
   hr: 'HR/绩效专员',
   manager: '部门负责人',
   employee: '普通员工',
-  peer: '协作评分人'
+  peer: '协作评分人',
+  executive: '高管'
 }
 
-// 角色权限菜单
+// 角色权限菜单（必须与 router/index.js 中的 meta.roles 保持一致）
 export const ROLE_MENU_ITEMS = {
   admin: [
-    { path: '/dashboard', title: '首页', icon: 'HomeFilled' },
+    { path: '/dashboard', title: '仪表盘', icon: 'HomeFilled' },
     { path: '/employees', title: '员工管理', icon: 'UserFilled' },
+    { path: '/departments', title: '部门岗位', icon: 'OfficeBuilding' },
     { path: '/cycles', title: '考核周期', icon: 'Calendar' },
-    { path: '/summary', title: '分数汇总', icon: 'Histogram' },
-    { path: '/distribution-review', title: '强制分布', icon: 'WarningFilled' },
-    { path: '/reports', title: '报表分析', icon: 'TrendCharts' },
-    { path: '/admin', title: '系统配置', icon: 'Setting' }
+    { path: '/kpi-templates', title: 'KPI模板', icon: 'Document' },
+    { path: '/summary', title: '绩效汇总', icon: 'TrendCharts' },
+    { path: '/reports', title: '报表导出', icon: 'Download' },
+    { path: '/distribution-review', title: '强制分布处理', icon: 'ScaleToOriginal' },
+    { path: '/config', title: '系统配置', icon: 'Setting' },
+    { path: '/audit-logs', title: '操作日志', icon: 'List' },
+    { path: '/appeals', title: '申诉管理', icon: 'Bell' },
+    { path: '/kpi-adjustment-approval', title: 'KPI调整审批', icon: 'Checked' }
   ],
   hr: [
-    { path: '/dashboard', title: '首页', icon: 'HomeFilled' },
+    { path: '/dashboard', title: '仪表盘', icon: 'HomeFilled' },
     { path: '/employees', title: '员工管理', icon: 'UserFilled' },
     { path: '/cycles', title: '考核周期', icon: 'Calendar' },
-    { path: '/summary', title: '分数汇总', icon: 'Histogram' },
-    { path: '/distribution-review', title: '强制分布', icon: 'WarningFilled' },
-    { path: '/reports', title: '报表分析', icon: 'TrendCharts' },
-    { path: '/appeal', title: '申诉处理', icon: 'ChatDotRound' }
+    { path: '/summary', title: '绩效汇总', icon: 'TrendCharts' },
+    { path: '/reports', title: '报表导出', icon: 'Download' },
+    { path: '/distribution-review', title: '强制分布处理', icon: 'ScaleToOriginal' },
+    { path: '/audit-logs', title: '操作日志', icon: 'List' },
+    { path: '/appeals', title: '申诉管理', icon: 'Bell' },
+    { path: '/kpi-adjustment-approval', title: 'KPI调整审批', icon: 'Checked' }
   ],
   manager: [
-    { path: '/dashboard', title: '首页', icon: 'HomeFilled' },
-    { path: '/score-sheet', title: '评分', icon: 'EditPen' },
-    { path: '/approval-workbench', title: '审批工作台', icon: 'Stamp' },
-    { path: '/interview', title: '绩效面谈', icon: 'ChatRound' },
-    { path: '/summary', title: '部门汇总', icon: 'Histogram' }
+    { path: '/dashboard', title: '仪表盘', icon: 'HomeFilled' },
+    { path: '/score-sheet', title: '上级评分', icon: 'Edit' },
+    { path: '/approval-workbench', title: '审批工作台', icon: 'Checked' },
+    { path: '/interviews', title: '绩效面谈', icon: 'ChatDotRound' },
+    { path: '/kpi-adjustment-request', title: 'KPI调整申请', icon: 'Edit' },
+    { path: '/kpi-adjustment-approval', title: 'KPI调整审批', icon: 'Checked' }
   ],
   employee: [
-    { path: '/dashboard', title: '首页', icon: 'HomeFilled' },
-    { path: '/score-sheet', title: '自评', icon: 'EditPen' },
-    { path: '/my-performance', title: '我的绩效', icon: 'UserFilled' },
-    { path: '/appeal', title: '申诉', icon: 'ChatDotRound' }
+    { path: '/dashboard', title: '仪表盘', icon: 'HomeFilled' },
+    { path: '/self-assessment', title: '自评', icon: 'Edit' },
+    { path: '/my-performance', title: '我的绩效', icon: 'TrendCharts' },
+    { path: '/appeal', title: '申诉', icon: 'Bell' }
   ],
   peer: [
-    { path: '/dashboard', title: '首页', icon: 'HomeFilled' },
-    { path: '/score-sheet', title: '协作评分', icon: 'EditPen' }
+    { path: '/dashboard', title: '仪表盘', icon: 'HomeFilled' },
+    { path: '/peer-review', title: '协作评分', icon: 'Share' }
+  ],
+  executive: [
+    { path: '/dashboard', title: '仪表盘', icon: 'HomeFilled' },
+    { path: '/kpi-adjustment-approval', title: 'KPI调整审批', icon: 'Checked' }
   ]
 }

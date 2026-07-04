@@ -59,17 +59,26 @@ test.describe('P0 场景 — 仪表盘与系统配置', () => {
 
     await expect(page.getByRole('tab', { name: '等级规则' })).toHaveClass(/is-active/)
 
-    const aMinInput = page.locator('.el-form-item').nth(0).locator('.el-input-number input').first()
-    await aMinInput.fill('92')
+    // 定位 A 和 B 等级的 ratio_limit 输入框，只修改比例（避免区间不连续）
+    const aFormItem = page.locator('.el-form-item').nth(0)
+    const aRatioInput = aFormItem.locator('.el-input-number input').nth(2)
+    const bFormItem = page.locator('.el-form-item').nth(1)
+    const bRatioInput = bFormItem.locator('.el-input-number input').nth(2)
+
+    await aRatioInput.fill('25')
+    await bRatioInput.fill('45')
 
     await page.getByRole('button', { name: '保存' }).first().click()
     await expectToast(page, '保存成功')
 
     await page.reload()
     await page.waitForTimeout(500)
-    await expect(aMinInput).toHaveValue('92.0')
+    await expect(aRatioInput).toHaveValue('25')
+    await expect(bRatioInput).toHaveValue('45')
 
-    await aMinInput.fill('90')
+    // 恢复默认值
+    await aRatioInput.fill('20')
+    await bRatioInput.fill('50')
     await page.getByRole('button', { name: '保存' }).first().click()
     await expectToast(page, '保存成功')
   })
@@ -102,6 +111,32 @@ test.describe('P0 场景 — 仪表盘与系统配置', () => {
     await attitudeInput.fill('20')
     await page.getByRole('button', { name: '保存' }).first().click()
     await expectToast(page, '保存成功')
+  })
+
+  test('维度权重合计不等于100时禁用保存按钮', async ({ page }) => {
+    test.setTimeout(60000)
+    await adminLogin(page)
+    await page.goto('/config')
+    await page.waitForTimeout(500)
+
+    await page.getByRole('tab', { name: '维度权重' }).click()
+    await page.waitForTimeout(300)
+
+    const perfInput = page.locator('.el-form-item').filter({ hasText: '工作业绩权重' }).locator('.el-input-number input').first()
+    await perfInput.fill('60')
+
+    const abilityInput = page.locator('.el-form-item').filter({ hasText: '工作能力权重' }).locator('.el-input-number input').first()
+    await abilityInput.fill('20')
+
+    const attitudeInput = page.locator('.el-form-item').filter({ hasText: '工作态度权重' }).locator('.el-input-number input').first()
+    await attitudeInput.fill('19')
+
+    // 断言合计标签为错误状态
+    await expect(page.locator('.el-tag--danger').filter({ hasText: '应为100' })).toBeVisible()
+
+    // 断言保存按钮被禁用
+    const saveBtn = page.getByRole('button', { name: '保存' }).first()
+    await expect(saveBtn).toBeDisabled()
   })
 })
 
@@ -260,13 +295,19 @@ test.describe('P1 场景 — 系统配置扩展', () => {
     await page.getByRole('tab', { name: '评价人权重' }).click()
     await page.waitForTimeout(300)
 
-    const selfInput = page.locator('.el-form-item').filter({ hasText: '自评' }).locator('.el-input-number input').first()
-    const managerInput = page.locator('.el-form-item').filter({ hasText: '上级' }).locator('.el-input-number input').first()
-    const peerInput = page.locator('.el-form-item').filter({ hasText: '协作' }).locator('.el-input-number input').first()
-    // 确保总和为100：15+65+20=100
-    await selfInput.fill('15')
-    await managerInput.fill('65')
-    await peerInput.fill('20')
+    // 每个维度下都有 自评/上级/协作；nth(0) 对应业绩维度
+    const selfInputs = page.locator('.el-form-item').filter({ hasText: '自评' }).locator('.el-input-number input')
+    const managerInputs = page.locator('.el-form-item').filter({ hasText: '上级' }).locator('.el-input-number input')
+    const peerInputs = page.locator('.el-form-item').filter({ hasText: '协作' }).locator('.el-input-number input')
+
+    const perfSelf = selfInputs.nth(0)
+    const perfManager = managerInputs.nth(0)
+    const perfPeer = peerInputs.nth(0)
+
+    // 业绩维度改为 25+70+5=100，能力与态度保持默认 100
+    await perfSelf.fill('25')
+    await perfManager.fill('70')
+    await perfPeer.fill('5')
 
     await page.getByRole('button', { name: '保存' }).first().click()
     await expectToast(page, '保存成功')
@@ -275,14 +316,14 @@ test.describe('P1 场景 — 系统配置扩展', () => {
     await page.waitForTimeout(500)
     await page.getByRole('tab', { name: '评价人权重' }).click()
     await page.waitForTimeout(300)
-    await expect(selfInput).toHaveValue('15')
-    await expect(managerInput).toHaveValue('65')
-    await expect(peerInput).toHaveValue('20')
+    await expect(perfSelf).toHaveValue('25')
+    await expect(perfManager).toHaveValue('70')
+    await expect(perfPeer).toHaveValue('5')
 
-    // 恢复：10+70+20=100
-    await selfInput.fill('10')
-    await managerInput.fill('70')
-    await peerInput.fill('20')
+    // 恢复：业绩 30+70+0=100
+    await perfSelf.fill('30')
+    await perfManager.fill('70')
+    await perfPeer.fill('0')
     await page.getByRole('button', { name: '保存' }).first().click()
     await expectToast(page, '保存成功')
   })

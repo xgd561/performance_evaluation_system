@@ -2,7 +2,7 @@
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-set PORT=8016
+set PORT=8000
 
 echo ==========================================
 echo  绩效考核系统后端重启脚本

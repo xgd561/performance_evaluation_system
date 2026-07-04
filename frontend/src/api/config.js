@@ -39,11 +39,3 @@ export function getPeerReviewEnabled() {
 export function updatePeerReviewEnabled(data) {
   return request.put('/config/peer-review-enabled', data)
 }
-
-export function getPeerReviewEnabled() {
-  return request.get('/config/peer-review-enabled')
-}
-
-export function updatePeerReviewEnabled(data) {
-  return request.put('/config/peer-review-enabled', data)
-}

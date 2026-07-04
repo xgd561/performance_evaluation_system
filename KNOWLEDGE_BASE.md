@@ -137,12 +137,14 @@ cd frontend && npm run dev
 | **日志** | `logs.py` | `GET /logs`, `GET /logs/actions` | 操作日志分页查询、按 action/target_type/日期范围过滤 |
 
 > **注意**：后端同时挂载了两套路由前缀：
+>
 > - `/api/v1/*` — 主 API 前缀
 > - `/*` — 向后兼容的无前缀路由（直接 `/auth/login` 等）
 
 ## 前端架构详解
 
 ### 技术栈
+
 - **框架**：Vue 3 + Vite 5 + Vue Router 4
 - **UI 库**：Element Plus（全量注册图标）
 - **状态管理**：Pinia（`stores/auth.js` 持久化到 `localStorage`，`stores/app.js` 管理 UI 状态）
@@ -151,16 +153,20 @@ cd frontend && npm run dev
 - **Excel**：xlsx.js（导入/导出）
 
 ### 路由守卫
+
 - 未登录自动跳转 `/login`
 - `meta.roles` 控制页面访问权限（`admin`, `hr`, `manager`, `employee`, `peer`）
 - 所有视图组件懒加载
 
 ### API 封装结构
+
 `src/api/` 下按模块拆分：
+
 - `request.js` — Axios 实例，`baseURL: '/api'`，请求拦截器注入 `Bearer token`，响应拦截器处理业务错误码
 - `auth.js`, `employees.js`, `departments.js`, `cycles.js`, `scores.js`, `approvals.js`, `appeals.js`, `interviews.js`, `reports.js`, `peers.js`, `logs.js`, `config.js`, `kpiAdjustment.js`, `distribution.js`, `kpi-templates.js`
 
 ### 公共组件
+
 - `Layout.vue` — 侧边栏 + 头部 + 主内容区，菜单权限按角色控制
 - `PageContainer.vue` — 页面标题容器
 - `BreadcrumbNav.vue` — 面包屑导航
@@ -195,16 +201,19 @@ cd frontend && npm run dev
 ## 核心服务逻辑
 
 ### 强制分布降级算法（`services/distribution_enforcer.py`）
+
 - 按部门统计各等级（A/B/C/D）人数，检查是否超出比例上限
 - 小部门豁免（≤5 人时放宽限制）
 - 超标时从低到高排序，依次降级（A→B→C→D），最多迭代 10 次
 - 返回调整后记录、调整日志、特批候选人名单
 
 ### 操作日志（`services/operation_logger.py`）
+
 - 统一写入 `operation_logs` 表，支持 `old_value`/`new_value` JSON 序列化
 - 只 `flush` 不 `commit`，由调用方控制事务边界
 
 ### PDF 生成（`utils/pdf_generator.py`）
+
 - ReportLab 生成 A4 绩效考核档案 PDF
 - 包含：基本信息、三维度得分、总分、等级、经理评语
 - 边缘情况：记录不存在时返回空字节
@@ -285,3 +294,14 @@ Element Plus 组件渲染后 DOM 结构复杂，推荐以下定位方式：
 - 失败时自动录屏：`test-results/<test-name>/video.webm`
 - 追踪文件（trace）：`test-results/<test-name>/trace.zip`，可用 `npx playwright show-trace trace.zip` 查看
 - HTML 报告：`frontend/playwright-report/index.html`
+
+print("初始化完成。请使用以下账号登录：")
+      303      print("  管理员 : zhangxiguan010001 / 010001@123")
+      304      print("  HR 专员: zhangyanzi020001 / 020001@123")
+      305 +    print("  经理   : lijianguo030001 / 030001@123")
+      306 +    print("  员工   : wangzhiqiang040001 / 040001@123")
+      307 +    print("  员工   : liufang050001 / 050001@123")
+      308 +    print("  员工   : zhaoxiaofeng060001 / 060001@123")
+      309 +    print("  高管   : chenzhiqiang070001 / 070001@123")
+      310      print("  首次登录后系统将强制要求修改密码。")
+      311      print("=" * 50)

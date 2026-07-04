@@ -6,15 +6,23 @@
         <el-card>
           <el-form label-width="120px">
             <el-form-item v-for="(rule, grade) in gradeRules" :key="grade" :label="grade">
-              <el-row :gutter="10">
-                <el-col :span="8">
-                  <el-input-number v-model="gradeRules[grade].min" placeholder="最低分" :precision="1" />
+              <el-row :gutter="10" align="middle">
+                <el-col :span="6">
+                  <el-input-number v-model="gradeRules[grade].min" placeholder="最低分" :precision="1" :min="0" :max="100" style="width: 100%" />
                 </el-col>
-                <el-col :span="2" style="text-align: center">~</el-col>
-                <el-col :span="8">
-                  <el-input-number v-model="gradeRules[grade].max" placeholder="最高分" :precision="1" />
+                <el-col :span="1" style="text-align: center">~</el-col>
+                <el-col :span="6">
+                  <el-input-number v-model="gradeRules[grade].max" placeholder="最高分" :precision="1" :min="0" :max="100" style="width: 100%" />
                 </el-col>
+                <el-col :span="1" style="text-align: center"></el-col>
+                <el-col :span="6">
+                  <el-input-number v-model="gradeRules[grade].ratio_limit" placeholder="人数上限%" :precision="0" :min="0" :max="100" style="width: 100%" />
+                </el-col>
+                <el-col :span="2" style="text-align: center">%</el-col>
               </el-row>
+            </el-form-item>
+            <el-form-item>
+              <el-tag :type="ratioTotal <= 100 ? 'success' : 'danger'" size="large">比例上限合计: {{ ratioTotal }}% ({{ ratioTotal <= 100 ? '正确' : '不能超过100%' }})</el-tag>
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="saveGradeRules">保存</el-button>
@@ -39,7 +47,7 @@
               <el-tag :type="weightTotal === 100 ? 'success' : 'danger'">当前合计: {{ weightTotal }}% ({{ weightTotal === 100 ? '正确' : '应为100' }})</el-tag>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveDimensionWeights">保存</el-button>
+              <el-button type="primary" :disabled="weightTotal !== 100" @click="saveDimensionWeights">保存</el-button>
             </el-form-item>
           </el-form>
         </el-card>
@@ -48,20 +56,50 @@
       <el-tab-pane label="评价人权重" name="reviewers">
         <el-card>
           <el-form label-width="120px">
+            <h4>业绩维度</h4>
             <el-form-item label="自评">
-              <el-input-number v-model="reviewerWeights.self" :min="0" :max="100" :precision="0" />
+              <el-input-number v-model="reviewerWeights.performance.self" :min="0" :max="100" :precision="0" />
             </el-form-item>
             <el-form-item label="上级">
-              <el-input-number v-model="reviewerWeights.manager" :min="0" :max="100" :precision="0" />
+              <el-input-number v-model="reviewerWeights.performance.manager" :min="0" :max="100" :precision="0" />
             </el-form-item>
             <el-form-item label="协作">
-              <el-input-number v-model="reviewerWeights.peer" :min="0" :max="100" :precision="0" />
+              <el-input-number v-model="reviewerWeights.performance.peer" :min="0" :max="100" :precision="0" />
             </el-form-item>
             <el-form-item>
-              <el-tag :type="reviewerTotal === 100 ? 'success' : 'danger'">当前合计: {{ reviewerTotal }}% ({{ reviewerTotal === 100 ? '正确' : '应为100' }})</el-tag>
+              <el-tag :type="performanceReviewerTotal === 100 ? 'success' : 'danger'">业绩维度合计: {{ performanceReviewerTotal }}% ({{ performanceReviewerTotal === 100 ? '正确' : '应为100' }})</el-tag>
+            </el-form-item>
+
+            <h4>能力维度</h4>
+            <el-form-item label="自评">
+              <el-input-number v-model="reviewerWeights.ability.self" :min="0" :max="100" :precision="0" />
+            </el-form-item>
+            <el-form-item label="上级">
+              <el-input-number v-model="reviewerWeights.ability.manager" :min="0" :max="100" :precision="0" />
+            </el-form-item>
+            <el-form-item label="协作">
+              <el-input-number v-model="reviewerWeights.ability.peer" :min="0" :max="100" :precision="0" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveReviewerWeights">保存</el-button>
+              <el-tag :type="abilityReviewerTotal === 100 ? 'success' : 'danger'">能力维度合计: {{ abilityReviewerTotal }}% ({{ abilityReviewerTotal === 100 ? '正确' : '应为100' }})</el-tag>
+            </el-form-item>
+
+            <h4>态度维度</h4>
+            <el-form-item label="自评">
+              <el-input-number v-model="reviewerWeights.attitude.self" :min="0" :max="100" :precision="0" />
+            </el-form-item>
+            <el-form-item label="上级">
+              <el-input-number v-model="reviewerWeights.attitude.manager" :min="0" :max="100" :precision="0" />
+            </el-form-item>
+            <el-form-item label="协作">
+              <el-input-number v-model="reviewerWeights.attitude.peer" :min="0" :max="100" :precision="0" />
+            </el-form-item>
+            <el-form-item>
+              <el-tag :type="attitudeReviewerTotal === 100 ? 'success' : 'danger'">态度维度合计: {{ attitudeReviewerTotal }}% ({{ attitudeReviewerTotal === 100 ? '正确' : '应为100' }})</el-tag>
+            </el-form-item>
+
+            <el-form-item>
+              <el-button type="primary" :disabled="!allReviewerTotalsValid" @click="saveReviewerWeights">保存</el-button>
             </el-form-item>
           </el-form>
         </el-card>
@@ -108,30 +146,105 @@ import { getGradeRules, updateGradeRules, getDimensionWeights, updateDimensionWe
 const activeTab = ref('grades')
 
 const gradeRules = reactive({
-  A: { min: 90, max: 100 },
-  B: { min: 80, max: 89.9 },
-  C: { min: 60, max: 79.9 },
-  D: { min: 0, max: 59.9 },
+  A: { min: 90, max: 100, ratio_limit: 20 },
+  B: { min: 80, max: 89.9, ratio_limit: 50 },
+  C: { min: 60, max: 79.9, ratio_limit: 25 },
+  D: { min: 0, max: 59.9, ratio_limit: 5 },
 })
 
 const dimensionWeights = reactive({ performance: 60, ability: 20, attitude: 20 })
-const reviewerWeights = reactive({ self: 10, manager: 70, peer: 20 })
+const reviewerWeights = reactive({
+  performance: { self: 30, manager: 70, peer: 0 },
+  ability: { self: 20, manager: 60, peer: 20 },
+  attitude: { self: 10, manager: 50, peer: 40 }
+})
 const smallDeptExemption = reactive({ threshold: 5, enabled: false })
 const peerReviewEnabled = ref(true)
 
 const weightTotal = computed(() => (dimensionWeights.performance || 0) + (dimensionWeights.ability || 0) + (dimensionWeights.attitude || 0))
-const reviewerTotal = computed(() => (reviewerWeights.self || 0) + (reviewerWeights.manager || 0) + (reviewerWeights.peer || 0))
+const performanceReviewerTotal = computed(() => reviewerWeights.performance.self + reviewerWeights.performance.manager + reviewerWeights.performance.peer)
+const abilityReviewerTotal = computed(() => reviewerWeights.ability.self + reviewerWeights.ability.manager + reviewerWeights.ability.peer)
+const attitudeReviewerTotal = computed(() => reviewerWeights.attitude.self + reviewerWeights.attitude.manager + reviewerWeights.attitude.peer)
+const allReviewerTotalsValid = computed(() => performanceReviewerTotal.value === 100 && abilityReviewerTotal.value === 100 && attitudeReviewerTotal.value === 100)
+const ratioTotal = computed(() => {
+  let total = 0
+  for (const g of ['A', 'B', 'C', 'D']) {
+    total += (Number(gradeRules[g]?.ratio_limit) || 0)
+  }
+  return total
+})
+
+function validateGradeRules() {
+  const grades = ['A', 'B', 'C', 'D']
+  for (const g of grades) {
+    const rule = gradeRules[g]
+    if (rule === undefined || rule.min === undefined || rule.max === undefined || rule.ratio_limit === undefined) {
+      return `缺少等级规则: ${g}`
+    }
+    if (Number(rule.min) >= Number(rule.max)) {
+      return `等级 ${g}: 最低分必须小于最高分`
+    }
+  }
+
+  const entries = grades.map(g => ({
+    name: g,
+    min: Number(gradeRules[g].min),
+    max: Number(gradeRules[g].max),
+    ratioLimit: Number(gradeRules[g].ratio_limit) / 100,
+  })).sort((a, b) => a.min - b.min)
+
+  const lowestMin = Math.min(...entries.map(e => e.min))
+  const highestMax = Math.max(...entries.map(e => e.max))
+  if (lowestMin > 0) return '最低等级最低分必须等于 0'
+  if (highestMax < 100) return '最高等级最高分必须等于 100'
+
+  for (let i = 0; i < entries.length - 1; i++) {
+    const curr = entries[i]
+    const next = entries[i + 1]
+    if (curr.max > next.min) {
+      return `区间重叠: ${curr.name}(${curr.min}-${curr.max}) 与 ${next.name}(${next.min}-${next.max})`
+    }
+    if (next.min > curr.max + 1) {
+      return `区间不连续: ${curr.name}(${curr.max}) 与 ${next.name}(${next.min})`
+    }
+  }
+
+  const totalRatio = entries.reduce((sum, e) => sum + e.ratioLimit, 0)
+  if (totalRatio > 1.0) {
+    return `比例上限合计不能超过 100%，当前为 ${(totalRatio * 100).toFixed(0)}%`
+  }
+
+  return null
+}
 
 async function loadAll() {
   try {
     const gr = await getGradeRules()
-    if (gr) Object.assign(gradeRules, gr)
+    if (gr) {
+      for (const g of ['A', 'B', 'C', 'D']) {
+        if (gr[g] !== undefined) {
+          if (typeof gr[g] === 'number') {
+            gradeRules[g].min = gr[g]
+          } else if (typeof gr[g] === 'object' && gr[g] !== null) {
+            if (gr[g].min !== undefined) gradeRules[g].min = gr[g].min
+            if (gr[g].max !== undefined) gradeRules[g].max = gr[g].max
+            if (gr[g].ratio_limit !== undefined) {
+              gradeRules[g].ratio_limit = Math.round(gr[g].ratio_limit * 100)
+            }
+          }
+        }
+      }
+    }
 
     const dw = await getDimensionWeights()
     if (dw) Object.assign(dimensionWeights, dw)
 
     const rw = await getReviewerWeights()
-    if (rw) Object.assign(reviewerWeights, rw)
+    if (rw) {
+      if (rw.performance) Object.assign(reviewerWeights.performance, rw.performance)
+      if (rw.ability) Object.assign(reviewerWeights.ability, rw.ability)
+      if (rw.attitude) Object.assign(reviewerWeights.attitude, rw.attitude)
+    }
 
     const sd = await getSmallDeptExemption()
     if (sd) Object.assign(smallDeptExemption, sd)
@@ -146,8 +259,21 @@ async function loadAll() {
 }
 
 async function saveGradeRules() {
+  const error = validateGradeRules()
+  if (error) {
+    ElMessage.warning(error)
+    return
+  }
+  const payload = {}
+  for (const g of ['A', 'B', 'C', 'D']) {
+    payload[g] = {
+      min: Number(gradeRules[g].min),
+      max: Number(gradeRules[g].max),
+      ratio_limit: Number(gradeRules[g].ratio_limit) / 100,
+    }
+  }
   try {
-    await updateGradeRules(gradeRules)
+    await updateGradeRules(payload)
     ElMessage.success('保存成功')
   } catch (e) {
     console.error(e)
@@ -168,8 +294,8 @@ async function saveDimensionWeights() {
 }
 
 async function saveReviewerWeights() {
-  if (reviewerTotal.value !== 100) {
-    ElMessage.warning('权重合计必须为100')
+  if (!allReviewerTotalsValid.value) {
+    ElMessage.warning('每个维度内的权重合计必须为100')
     return
   }
   try {

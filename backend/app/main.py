@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from app.database import init_db
-from app.routers import auth, employees, departments, cycles, kpi_templates, config, dashboard, appeals, scores, reports, approvals, interviews, peers, logs
+from app.routers import auth, employees, departments, cycles, kpi_templates, config, dashboard, appeals, scores, reports, approvals, interviews, peers, logs, health
 import app.models
 
 app = FastAPI(
@@ -19,6 +19,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from app.utils.audit_logger import AuditLogMiddleware
+
+app.add_middleware(AuditLogMiddleware)
 
 
 @app.exception_handler(HTTPException)
@@ -55,6 +59,7 @@ api_v1.include_router(interviews.router, prefix="/interviews", tags=["绩效面�
 api_v1.include_router(reports.router, prefix="/reports", tags=["报表分析"])
 api_v1.include_router(peers.router, prefix="/peer-reviewers", tags=["协作评分"])
 api_v1.include_router(logs.router, prefix="/logs", tags=["操作日志"])
+api_v1.include_router(health.router, tags=["健康检查"])
 
 app.include_router(api_v1)
 

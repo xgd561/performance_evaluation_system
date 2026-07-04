@@ -1,6 +1,9 @@
 <template>
   <div class="app-header">
     <div class="header-left">
+      <div class="collapse-btn" @click="appStore.toggleSidebar()">
+        <el-icon :size="18"><Fold v-if="!appStore.sidebarCollapsed" /><Expand v-else /></el-icon>
+      </div>
       <div class="logo">
         <el-icon :size="28" color="#409eff"><Histogram /></el-icon>
         <span class="logo-text">绩效考核评分系统</span>
@@ -31,10 +34,12 @@
 <script setup>
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 import { ROLE_TEXT } from '@/utils/constants'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const appStore = useAppStore()
 
 function handleCommand(command) {
   if (command === 'logout') {
@@ -46,18 +51,32 @@ function handleCommand(command) {
 
 <style scoped>
 .app-header {
-  height: var(--header-height);
+  height: var(--header-height, 56px);
   background-color: #fff;
   border-bottom: 1px solid #e4e7ed;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 1000;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.collapse-btn {
+  cursor: pointer;
+  color: #606266;
+  padding: 6px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.collapse-btn:hover {
+  background-color: #f5f7fa;
+  color: #409eff;
 }
 
 .logo {
@@ -70,6 +89,11 @@ function handleCommand(command) {
   font-size: 18px;
   font-weight: 600;
   color: #303133;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
 }
 
 .user-info {
