@@ -83,6 +83,19 @@
           </el-form>
         </el-card>
       </el-tab-pane>
+      <el-tab-pane label="协作评分开关" name="peer_review">
+        <el-card>
+          <el-form label-width="180px">
+            <el-form-item label="协作评分全局默认值">
+              <el-switch v-model="peerReviewEnabled" />
+              <span class="hint"> 关闭后，新创建的考核周期默认不启用协作评分</span>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="savePeerReviewEnabled">保存</el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -90,7 +103,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getGradeRules, updateGradeRules, getDimensionWeights, updateDimensionWeights, getReviewerWeights, updateReviewerWeights, getSmallDeptExemption, updateSmallDeptExemption } from '@/api/config'
+import { getGradeRules, updateGradeRules, getDimensionWeights, updateDimensionWeights, getReviewerWeights, updateReviewerWeights, getSmallDeptExemption, updateSmallDeptExemption, getPeerReviewEnabled, updatePeerReviewEnabled } from '@/api/config'
 
 const activeTab = ref('grades')
 
@@ -104,6 +117,7 @@ const gradeRules = reactive({
 const dimensionWeights = reactive({ performance: 60, ability: 20, attitude: 20 })
 const reviewerWeights = reactive({ self: 10, manager: 70, peer: 20 })
 const smallDeptExemption = reactive({ threshold: 5, enabled: false })
+const peerReviewEnabled = ref(true)
 
 const weightTotal = computed(() => (dimensionWeights.performance || 0) + (dimensionWeights.ability || 0) + (dimensionWeights.attitude || 0))
 const reviewerTotal = computed(() => (reviewerWeights.self || 0) + (reviewerWeights.manager || 0) + (reviewerWeights.peer || 0))
@@ -121,6 +135,11 @@ async function loadAll() {
 
     const sd = await getSmallDeptExemption()
     if (sd) Object.assign(smallDeptExemption, sd)
+
+    const pr = await getPeerReviewEnabled()
+    if (pr && typeof pr.enabled === 'boolean') {
+      peerReviewEnabled.value = pr.enabled
+    }
   } catch (e) {
     console.error(e)
   }
@@ -164,6 +183,15 @@ async function saveReviewerWeights() {
 async function saveSmallDept() {
   try {
     await updateSmallDeptExemption(smallDeptExemption)
+    ElMessage.success('保存成功')
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+async function savePeerReviewEnabled() {
+  try {
+    await updatePeerReviewEnabled({ enabled: peerReviewEnabled.value })
     ElMessage.success('保存成功')
   } catch (e) {
     console.error(e)

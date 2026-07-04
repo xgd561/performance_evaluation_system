@@ -76,6 +76,7 @@ class AssessmentCycle(Base):
     grade_rules = Column(Text, nullable=False, default='{"A":{"min":90,"max":100,"ratio_limit":0.2},"B":{"min":80,"max":89.9,"ratio_limit":0.5},"C":{"min":60,"max":79.9,"ratio_limit":0.25},"D":{"min":0,"max":59.9,"ratio_limit":0.05}}')
     is_distribution_enabled = Column(Boolean, default=True)
     small_dept_exemption = Column(Boolean, default=True)
+    peer_review_enabled = Column(Boolean, default=True)
     approval_chain_config = Column(Text, nullable=True)
     is_locked = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)

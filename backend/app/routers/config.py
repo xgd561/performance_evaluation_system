@@ -237,3 +237,44 @@ def update_small_dept_exemption(
     )
 
     return {"code": 200, "message": "小部门豁免配置已保存", "enabled": req.get("enabled"), "threshold": req.get("threshold")}
+
+
+@router.get("/peer-review-enabled")
+def get_peer_review_enabled(
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr", "manager")),
+):
+    cfg = _get_or_create_config(
+        db, "peer_review_enabled",
+        json.dumps({"enabled": True})
+    )
+    return json.loads(cfg.value)
+
+
+@router.put("/peer-review-enabled")
+def update_peer_review_enabled(
+    req: dict,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin")),
+):
+    enabled = req.get("enabled")
+    if not isinstance(enabled, bool):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="enabled 必须为布尔值",
+        )
+
+    cfg = _get_or_create_config(db, "peer_review_enabled", "{}")
+    cfg.value = json.dumps({"enabled": enabled})
+    db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="update_peer_review_enabled",
+        target_type="system_config",
+        target_id=cfg.id,
+        new_value={"peer_review_enabled": {"enabled": enabled}},
+    )
+
+    return {"code": 200, "message": "协作评分配置已更新", "enabled": enabled}

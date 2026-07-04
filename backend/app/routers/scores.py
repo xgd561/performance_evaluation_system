@@ -340,7 +340,7 @@ def submit_manager_score(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权为此员工评分")
 
     # 状态校验
-    if record.status not in ["pending_manager", "pending_self"]:
+    if record.status != "pending_manager":
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="当前状态不允许提交上级评分")
 
     # 分数校验
@@ -374,7 +374,13 @@ def submit_manager_score(
     old_status = record.status
     record.manager_scores = json.dumps(manager_scores)
     record.manager_comment = body.comment
-    record.status = "pending_peer"
+
+    # 根据周期配置决定是否进入协作评分阶段
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == record.cycle_id).first()
+    if cycle and cycle.peer_review_enabled is False:
+        record.status = "pending_summary"
+    else:
+        record.status = "pending_peer"
 
     db.commit()
     db.refresh(record)

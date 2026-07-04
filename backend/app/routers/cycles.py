@@ -48,6 +48,7 @@ def list_cycles(
             "grade_rules": json.loads(c.grade_rules) if c.grade_rules else {},
             "is_distribution_enabled": c.is_distribution_enabled,
             "small_dept_exemption": c.small_dept_exemption,
+            "peer_review_enabled": c.peer_review_enabled,
             "created_at": c.created_at.isoformat() if c.created_at else None,
         })
     return result
@@ -92,6 +93,7 @@ def create_cycle(
         reviewer_weights=json.dumps(req.weights),
         grade_rules=json.dumps(normalized_grade_rules),
         small_dept_exemption=req.small_dept_exemption if req.small_dept_exemption is not None else True,
+        peer_review_enabled=req.peer_review_enabled if req.peer_review_enabled is not None else True,
     )
     db.add(cycle)
     db.commit()
@@ -108,6 +110,7 @@ def create_cycle(
         "status": "未开始",
         "weights": req.weights,
         "grade_rules": raw_grade_rules,
+        "peer_review_enabled": cycle.peer_review_enabled,
         "created_at": cycle.created_at.isoformat() if cycle.created_at else None,
     }
 
@@ -133,6 +136,8 @@ def update_cycle(
             setattr(cycle, "grade_rules", json.dumps(value))
         elif field == "small_dept_exemption":
             setattr(cycle, "small_dept_exemption", value)
+        elif field == "peer_review_enabled":
+            setattr(cycle, "peer_review_enabled", value)
         else:
             setattr(cycle, field, value)
     db.commit()
@@ -162,6 +167,7 @@ def update_cycle(
         "grade_rules": json.loads(cycle.grade_rules) if cycle.grade_rules else {},
         "is_distribution_enabled": cycle.is_distribution_enabled,
         "small_dept_exemption": cycle.small_dept_exemption,
+        "peer_review_enabled": cycle.peer_review_enabled,
         "created_at": cycle.created_at.isoformat() if cycle.created_at else None,
     }
 

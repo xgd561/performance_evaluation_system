@@ -114,20 +114,21 @@ async def startup_event():
 
     db = SessionLocal()
     try:
+        # Ensure default department and position exist (used by all seeded users)
+        dept = db.query(Department).filter(Department.code == "ADMIN").first()
+        if not dept:
+            dept = Department(name="管理部", code="ADMIN")
+            db.add(dept)
+            db.flush()
+        pos = db.query(Position).filter(Position.name == "系统管理员").first()
+        if not pos:
+            pos = Position(name="系统管理员", department_id=dept.id)
+            db.add(pos)
+            db.flush()
+
         # Check if admin user exists
         admin = db.query(User).filter(User.username == "admin").first()
         if not admin:
-            # Create default department and position
-            dept = db.query(Department).filter(Department.code == "ADMIN").first()
-            if not dept:
-                dept = Department(name="管理部", code="ADMIN")
-                db.add(dept)
-                db.flush()
-            pos = db.query(Position).filter(Position.name == "系统管理员").first()
-            if not pos:
-                pos = Position(name="系统管理员", department_id=dept.id)
-                db.add(pos)
-                db.flush()
             # Create admin employee
             emp = Employee(
                 employee_no="ADMIN001",

@@ -114,6 +114,8 @@ cd frontend && npm run dev
 
 1. **时间窗口逾期检测与自动锁定/提醒机制**（如自评截止后自动锁定并发送提醒）
 2. **更完整的自动化测试覆盖**（当前 `test_approvals.py` 部分测试因 `approve_record` 的 `status == "pending_approval"` 强校验与测试用例状态不一致而存在预存失败）
+3. **前端 ConfigView 协作评分开关 UI**（后端已支持 `GET/PUT /config/peer-review-enabled`，前端需在系统配置页面增加开关）
+4. **考核周期创建/编辑页面协作评分开关 UI**（后端已支持 `peer_review_enabled` 字段，前端需在周期配置中增加继承全局 + 手动覆盖的开关）
 
 ## 后端 API 路由详解
 
@@ -124,7 +126,7 @@ cd frontend && npm run dev
 | **部门** | `departments.py` | `GET /departments`, `GET /positions`, `POST /positions` | 部门层级、岗位管理、删除保护（有员工/岗位时禁止删除） |
 | **考核周期** | `cycles.py` | `GET /assessment-cycles`, `POST /assessment-cycles/launch`, `POST /assessment-cycles/{id}/publish` | 周期创建、启动（自动创建考核记录和 KPI 快照）、发布 |
 | **KPI 模板** | `kpi_templates.py` | `GET /kpi-templates`, `POST /kpi-templates/{id}/adjust` | KPI 模板 CRUD、KPI 动态调整申请与审批 |
-| **系统配置** | `config.py` | `GET /config/grade-rules`, `PUT /config/dimension-weights` | 等级规则、维度权重、评价人权重、小部门豁免配置 |
+| **系统配置** | `config.py` | `GET /config/grade-rules`, `PUT /config/dimension-weights`, `GET /config/peer-review-enabled` | 等级规则、维度权重、评价人权重、小部门豁免配置、协作评分开关（全局默认值） |
 | **仪表盘** | `dashboard.py` | `GET /dashboard`, `/dashboard/manager`, `/dashboard/peer`, `/dashboard/employee` | 按角色隔离统计（Admin/HR 看全局，经理看团队，员工只看自己） |
 | **申诉** | `appeals.py` | `GET /appeals`, `POST /appeals`, `POST /appeals/{id}/review` | 申诉创建、审批（支持修改总分和等级） |
 | **评分** | `scores.py` | `GET /scores/summary/{cycle_id}`, `POST /scores/calculate/{cycle_id}`, `POST /scores/manager/{record_id}` | 加权计算、强制分布、评分草稿、详情查询、分数掩码 |

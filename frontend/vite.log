@@ -5,15 +5,139 @@ npm warn Unknown user config "sentrycli_cdnurl". This will stop working in the n
 > vite
 
 Port 3000 is in use, trying another one...
-Port 3001 is in use, trying another one...
 
-  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m933[22m[2m[0m ms[22m
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m943[22m[2m[0m ms[22m
 
-  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3002[22m/[39m
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3001[22m/[39m
 [2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
-[2m03:49:41[22m [36m[1m[vite][22m[39m [32mvite.config.js changed, restarting server...[39m
-[2m03:49:41[22m [36m[1m[vite][22m[39m server restarted.
-[2m07:17:30[22m [36m[1m[vite][22m[39m [32mvite.config.js changed, restarting server...[39m
-[2m07:17:31[22m [36m[1m[vite][22m[39m server restarted.
-[2m08:04:18[22m [36m[1m[vite][22m[39m [32mvite.config.js changed, restarting server...[39m
-[2m08:04:18[22m [36m[1m[vite][22m[39m server restarted.
+[2m01:49:26[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m01:49:26[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m01:49:51[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m01:50:29[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m02:09:22[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m02:13:20[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m02:14:14[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m02:34:31[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m02:34:31[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m02:34:31[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m02:47:28[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m02:47:28[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m03:08:50[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m03:11:16[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m03:12:17[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m05:41:39[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m05:41:39[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m05:41:39[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m05:54:35[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m05:54:36[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m05:54:36[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:17:03[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:17:03[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:17:03[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:22:49[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:22:49[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:22:49[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:33:30[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:33:30[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:33:30[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:45:29[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:45:29[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:45:29[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:50:45[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:50:45[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:50:45[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:56:07[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:56:07[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m06:56:07[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:01:48[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:01:48[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:08:57[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:08:57[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:08:57[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:20:04[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:20:05[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:25:39[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:25:39[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:25:39[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:33:41[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:33:41[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:33:41[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:42:49[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:42:49[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:42:49[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:54:41[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:56:13[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:56:47[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:56:47[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:57:38[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m07:59:07[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:00:05[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:00:39[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:00:39[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:15:52[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:15:52[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:15:52[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:17:25[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:18:12[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:35:02[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:35:03[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:38:12[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:40:43[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:41:57[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:42:37[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:45:16[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:45:16[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:45:16[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:46:46[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:49:16[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:56:43[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:57:28[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m08:58:04[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:05:50[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:05:50[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:05:50[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:23:13[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:23:13[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:23:13[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:30:24[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:30:24[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:30:24[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:35:40[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:35:40[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:35:40[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:47:55[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:47:55[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:59:48[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:59:49[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m09:59:49[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m10:13:34[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m10:13:35[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m10:13:35[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m10:18:06[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m10:28:44[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m10:28:44[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m11:53:01[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m11:53:02[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:16:56[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:16:56[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:16:56[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:20:09[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:22:27[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:22:57[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:23:31[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:24:59[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:25:58[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:26:59[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:28:17[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:29:22[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:33:58[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:33:58[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:33:58[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:51:42[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:55:44[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:55:44[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:55:44[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:59:48[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:59:48[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m12:59:48[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m
+[2m13:01:02[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mplaywright-report/index.html[22m

@@ -194,6 +194,7 @@ class AssessmentCycleCreate(BaseModel):
     weights: Dict[str, int]
     grade_rules: Dict[str, Any]
     small_dept_exemption: Optional[bool] = True
+    peer_review_enabled: Optional[bool] = True
 
     @field_validator('weights')
     @classmethod
@@ -230,6 +231,7 @@ class AssessmentCycleUpdate(BaseModel):
     weights: Optional[Dict[str, int]] = None
     grade_rules: Optional[Dict[str, Any]] = None
     small_dept_exemption: Optional[bool] = None
+    peer_review_enabled: Optional[bool] = None
 
 class AssessmentCycleOut(BaseModel):
     id: int
@@ -245,6 +247,7 @@ class AssessmentCycleOut(BaseModel):
     grade_rules: Optional[Dict[str, Any]]
     is_distribution_enabled: bool
     small_dept_exemption: bool
+    peer_review_enabled: bool
     created_at: Optional[datetime]
 
     class Config:

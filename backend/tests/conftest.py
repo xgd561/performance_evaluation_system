@@ -4,6 +4,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker, Session
 
+from sqlalchemy import text
+
 from app.main import app
 from app.database import get_db, Base
 from app.models import User, Employee, Department, Position
@@ -23,13 +25,23 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 @pytest.fixture(scope="function")
 def db_session():
     """Create a fresh database session for each test function."""
+    # Force drop all tables with foreign keys disabled to handle circular dependencies
+    with engine.begin() as conn:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        for table in reversed(Base.metadata.sorted_tables):
+            conn.execute(text(f"DROP TABLE IF EXISTS {table.name}"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
     Base.metadata.create_all(bind=engine)
     session = TestingSessionLocal()
     try:
         yield session
     finally:
         session.close()
-        Base.metadata.drop_all(bind=engine)
+        with engine.begin() as conn:
+            conn.execute(text("PRAGMA foreign_keys=OFF"))
+            for table in reversed(Base.metadata.sorted_tables):
+                conn.execute(text(f"DROP TABLE IF EXISTS {table.name}"))
+            conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
 @pytest.fixture(scope="function")

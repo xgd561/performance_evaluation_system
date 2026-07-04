@@ -17,24 +17,32 @@ from app.auth import get_password_hash
 @pytest.fixture(scope="function")
 def peer_user(db_session: Session):
     """Create a peer reviewer user with employee."""
-    dept = Department(name="协作部", code="PEER")
-    db_session.add(dept)
-    db_session.flush()
-    pos = Position(name="协作专员", department_id=dept.id)
-    db_session.add(pos)
-    db_session.flush()
-    emp = Employee(employee_no="PEER001", name="赵协作", department_id=dept.id, position_id=pos.id)
-    db_session.add(emp)
-    db_session.flush()
-    user = User(
-        username="peer001",
-        password_hash=get_password_hash("Peer001@123"),
-        role="peer",
-        employee_id=emp.id,
-        is_first_login=False,
-    )
-    db_session.add(user)
-    db_session.commit()
+    dept = db_session.query(Department).filter(Department.code == "PEER").first()
+    if not dept:
+        dept = Department(name="协作部", code="PEER")
+        db_session.add(dept)
+        db_session.flush()
+    pos = db_session.query(Position).filter(Position.name == "协作专员", Position.department_id == dept.id).first()
+    if not pos:
+        pos = Position(name="协作专员", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+    emp = db_session.query(Employee).filter(Employee.employee_no == "PEER001").first()
+    if not emp:
+        emp = Employee(employee_no="PEER001", name="赵协作", department_id=dept.id, position_id=pos.id)
+        db_session.add(emp)
+        db_session.flush()
+    user = db_session.query(User).filter(User.username == "peer001").first()
+    if not user:
+        user = User(
+            username="peer001",
+            password_hash=get_password_hash("Peer001@123"),
+            role="peer",
+            employee_id=emp.id,
+            is_first_login=False,
+        )
+        db_session.add(user)
+        db_session.commit()
     return user
 
 
@@ -49,32 +57,40 @@ def peer_token(client: TestClient, peer_user):
 @pytest.fixture(scope="function")
 def subordinate_user(db_session: Session, manager_user):
     """Create a subordinate employee under manager_user."""
-    dept = Department(name="技术部", code="TECH")
-    db_session.add(dept)
-    db_session.flush()
-    pos = Position(name="Java工程师", department_id=dept.id)
-    db_session.add(pos)
-    db_session.flush()
+    dept = db_session.query(Department).filter(Department.code == "TECH").first()
+    if not dept:
+        dept = Department(name="技术部", code="TECH")
+        db_session.add(dept)
+        db_session.flush()
+    pos = db_session.query(Position).filter(Position.name == "Java工程师", Position.department_id == dept.id).first()
+    if not pos:
+        pos = Position(name="Java工程师", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
     # manager_user is in the same dept but we need to link manager-subordinate
     # manager_user fixture creates mgr001 emp with id available via manager_user.employee_id
-    emp = Employee(
-        employee_no="SUB001",
-        name="下属员工",
-        department_id=dept.id,
-        position_id=pos.id,
-        manager_id=manager_user.employee_id,
-    )
-    db_session.add(emp)
-    db_session.flush()
-    user = User(
-        username="sub001",
-        password_hash=get_password_hash("Sub001@123"),
-        role="employee",
-        employee_id=emp.id,
-        is_first_login=False,
-    )
-    db_session.add(user)
-    db_session.commit()
+    emp = db_session.query(Employee).filter(Employee.employee_no == "SUB001").first()
+    if not emp:
+        emp = Employee(
+            employee_no="SUB001",
+            name="下属员工",
+            department_id=dept.id,
+            position_id=pos.id,
+            manager_id=manager_user.employee_id,
+        )
+        db_session.add(emp)
+        db_session.flush()
+    user = db_session.query(User).filter(User.username == "sub001").first()
+    if not user:
+        user = User(
+            username="sub001",
+            password_hash=get_password_hash("Sub001@123"),
+            role="employee",
+            employee_id=emp.id,
+            is_first_login=False,
+        )
+        db_session.add(user)
+        db_session.commit()
     return user
 
 

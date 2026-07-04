@@ -31,3 +31,19 @@ export function getSmallDeptExemption() {
 export function updateSmallDeptExemption(data) {
   return request.put('/config/small-dept-exemption', data)
 }
+
+export function getPeerReviewEnabled() {
+  return request.get('/config/peer-review-enabled')
+}
+
+export function updatePeerReviewEnabled(data) {
+  return request.put('/config/peer-review-enabled', data)
+}
+
+export function getPeerReviewEnabled() {
+  return request.get('/config/peer-review-enabled')
+}
+
+export function updatePeerReviewEnabled(data) {
+  return request.put('/config/peer-review-enabled', data)
+}

@@ -47,7 +47,8 @@
 │                        客户端浏览器                            │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │  Vue 3 SPA (Vite + Element Plus + ECharts + Pinia)   │   │
-│  │  • 登录页 / 评分页 / 汇总页 / 报表页 / 配置页          │   │
+│  │  页面：登录/首页仪表盘/自评/上级评分/协作评分/汇总/审批 │   │
+│  │  面谈/申诉/我的绩效/导入/配置/KPI模板/组织架构/周期管理 │   │
 │  └─────────────────────────────────────────────────────┘   │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTP REST API (JSON)
@@ -56,33 +57,139 @@
 │                    FastAPI 后端服务                            │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────┐ │
 │  │ 认证模块    │  │ 考核管理    │  │ 评分管理    │  │ 报表模块 │ │
-│  │ (JWT)      │  │ (CRUD)     │  │ (计算)      │  │ (统计)  │ │
+│  │ (JWT/RBAC) │  │ (周期/状态)│  │ (加权/汇总)│  │ (统计)  │ │
+│  └────────────┘  └────────────┘  └────────────┘  └────────┘ │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────┐ │
+│  │ 审批流程    │  │ KPI 模板   │  │ 员工管理    │  │ 申诉管理 │ │
+│  │ (状态机)   │  │ (配置)     │  │ (CRUD/导入)│  │ (复核)  │ │
 │  └────────────┘  └────────────┘  └────────────┘  └────────┘ │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐             │
-│  │ 审批流程    │  │ KPI 模板   │  │ 员工管理    │             │
-│  │ (状态机)   │  │ (配置)     │  │ (CRUD)     │             │
+│  │ 通知模块    │  │ 系统配置    │  │ 数据归档    │             │
+│  │ (站内信)   │  │ (规则/权重)│  │ (PDF/锁定) │             │
 │  └────────────┘  └────────────┘  └────────────┘             │
 └──────────────────────────┬──────────────────────────────────┘
                            │ SQLAlchemy ORM
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  SQLite 数据库 (单文件, 零配置)                                │
-│  • 考核周期 / 员工 / KPI / 评分记录 / 审批记录 / 历史归档       │
+│  18 张表：考核周期/员工/部门/岗位/考核记录/评分明细/KPI快照    │
+│  审批记录/申诉/面谈/协作评分/周期人员/用户/操作日志           │
+│  系统配置/分数草稿/通知消息/部门周期配置/历史归档             │
 └─────────────────────────────────────────────────────────────┘
 ```
+---
+
+#### 2.1.1 核心数据流架构
+
+系统以**考核记录（AssessmentRecord）**为核心实体，贯穿 6 阶段生命周期。以下是一条考核记录从创建到归档的完整数据流：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  阶段① 准备                    阶段② 评分                    阶段③ 汇总     │
+│  HR 创建周期 ──→ 启动考核 ──→ 生成评分表 ──→ 员工自评 ──→ 上级评分 ──→ 协作评分 ──→ 触发汇总 │
+│       │                           │              │              │              │              │
+│       ▼                           ▼              ▼              ▼              ▼              ▼
+│  assessment_cycles         assessment_records  score_details  score_details  score_details  weighted_score
+│  + cycle_departments       + kpi_snapshots     (self)       (manager)      (peer)         + grade
+│  + cycle_employees                                                          peer_reviewers   + distribution_review
+├─────────────────────────────────────────────────────────────────────────────┤
+│  阶段④ 审批                    阶段⑤ 面谈                    阶段⑥ 发布与归档 │
+│  Step 1 直属上级 ──→ Step 2 HR ──→ 绩效面谈 ──→ 结果发布 ──→ 申诉期 ──→ 归档锁定 │
+│       │                │              │              │              │              │
+│       ▼                ▼              ▼              ▼              ▼              ▼
+│  approval_records  approval_records  interviews   notifications  appeal_records  is_locked=true
+│  (step_index=1)    (step_index=2)    + score_drafts               (可选)          + pdf_archive
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**数据流关键说明**：
+- **评分草稿**：自评/上级评/协作评在提交前均先写入 `score_drafts`，提交后才转正为 `score_details`。
+- **协作评分人分配**：上级评分提交时，若周期启用协作评分且尚未分配，则先写入 `peer_reviewers`，再提交评分。
+- **强制分布干预**：汇总阶段若触发强制分布调整，系统生成 `distribution_adjustments` 记录，HR 确认后更新 `grade` 和 `adjusted_level`。
+- **通知触发点**：周期启动、催促、审批通过/驳回、结果发布、申诉复核等节点均写入 `notifications`。
+- **归档锁定**：`archived` 状态一旦设置，所有关联的 `assessment_records` 的 `is_locked` 置为 true，任何评分/审批/申诉修改接口均拒绝操作。
+
+#### 2.1.2 系统边界与外部依赖
+
+本系统为**纯内网 MVP 应用**，无外部集成，边界清晰：
+
+| 边界项 | 处理方式 | 说明 |
+|--------|---------|------|
+| **用户认证** | 系统自建 `users` 表 + JWT | 无 LDAP/SSO/AD 集成，MVP 后可选扩展 |
+| **邮件/短信通知** | 站内通知（`notifications` 表）| MVP 仅支持站内消息，无邮件/短信网关 |
+| **文件存储** | 本地文件系统 | 员工导入模板、PDF 档案、导出 Excel 均存本地 `uploads/` 目录 |
+| **组织架构同步** | 手动维护 | 部门/岗位/员工通过前端页面或 Excel 导入维护，无 HR 系统同步 |
+| **图表渲染** | 前端 ECharts | 后端仅提供聚合数据，不生成图片 |
+| **数据库** | SQLite 单文件 | 零配置，备份即复制 `.db` 文件；后续可迁移至 MySQL/PostgreSQL |
+
+#### 2.1.3 后端分层架构
+
+后端采用经典三层架构，模块内部职责清晰：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      API 层 (Routers)                         │
+│  • FastAPI Router 定义 REST 端点                              │
+│  • 参数校验 (Pydantic Schema)                                │
+│  • JWT 鉴权与 RBAC 权限守卫 (Dependencies)                   │
+├─────────────────────────────────────────────────────────────┤
+│                    Service 层 (Services)                      │
+│  • 业务逻辑编排（状态机流转、加权计算、强制分布）               │
+│  • 事务控制（数据库事务包裹多表操作）                          │
+│  • 跨模块协调（评分提交后触发通知、审批通过后更新状态）          │
+├─────────────────────────────────────────────────────────────┤
+│                  Repository 层 (Models/ORM)                   │
+│  • SQLAlchemy Model 定义                                     │
+│  • 基础 CRUD 封装（create/get/update/delete）               │
+│  • 复杂查询（聚合统计、关联查询、分页）                        │
+├─────────────────────────────────────────────────────────────┤
+│                   基础设施层 (Infrastructure)                 │
+│  • SQLite 数据库连接与会话管理                                 │
+│  • 文件系统（PDF/Excel 读写）                                │
+│  • 后台任务调度（APScheduler / asyncio）                     │
+│  • 操作日志自动记录（Middleware）                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**关键原则**：
+- **Router 层无业务逻辑**：仅做参数校验、权限校验、调用 Service。
+- **Service 层无原始 SQL**：仅通过 Repository/ORM 操作数据。
+- **Repository 层无 HTTP 上下文**：仅接收参数，返回数据模型。
+
+#### 2.1.4 截止监控与后台任务
+
+系统依赖定时任务实现截止监控与自动状态流转：
+
+| 任务类型 | 触发时机 | 执行逻辑 | 技术方案 |
+|---------|---------|---------|---------|
+| **截止提醒** | 截止前 24h / 截止前 4h | 扫描 `assessment_records` 中未提交的评分，向相关人员发送 `notifications` 站内通知 | APScheduler 定时轮询（每 30 分钟） |
+| **逾期标记** | 超过 deadline | 将未提交的评分状态标记为 `overdue`，并向 HR 发送汇总通知 | APScheduler 定时轮询（每小时） |
+| **状态自动流转** | 协作评分截止后 | 若所有协作人已提交，自动从 `pending_peer` → `pending_summary` | 评分提交时触发 + 定时兜底 |
+| **归档清理** | 归档后 30 天 | 清理 `score_drafts` 中已归档的草稿数据（释放空间） | APScheduler 每日凌晨执行 |
+
+**技术选型**：
+- MVP 阶段使用 `APScheduler`（内置于 FastAPI，零额外依赖）。
+- 定时任务与主应用同进程启动，通过 `BackgroundScheduler` 运行。
+- 任务执行日志写入 `operation_logs`，便于审计与排障。
+
 
 ### 2.2 模块职责划分
 
 | 模块 | 职责 | 核心能力 |
 |------|------|---------|
 | **认证模块** | 用户登录、权限校验、JWT 签发 | 基于角色的访问控制 (RBAC) |
-| **员工管理** | 员工信息 CRUD、部门/岗位/考核关系维护 | Excel 导入、考核关系树 |
-| **KPI 模板** | 按岗位配置 KPI 指标库、权重、目标值 | 模板版本快照 |
-| **考核管理** | 考核周期 CRUD、发起考核、进度监控、状态流转 | 状态机驱动、时间窗口控制 |
-| **评分管理** | 生成评分表、接收评分、自动汇总计算 | 加权算法、差异校验、锁定机制 |
-| **审批流程** | 多级审批、异常标红、通过/驳回/打回 | 审批链配置、审批记录留痕 |
-| **报表分析** | 等级分布、历史趋势、绩效档案 | ECharts 渲染、PDF/Excel 导出 |
-| **申诉管理** | 申诉发起、复核、结果变更 | 申诉绑定考核记录、审批联动 |
+| **员工管理** | 员工信息 CRUD、部门/岗位/考核关系维护 | Excel 导入、考核关系树、部门负责人设置 |
+| **KPI 模板** | 按岗位配置 KPI 指标库、权重、目标值 | 模板版本快照、行内编辑 |
+| **考核管理** | 考核周期 CRUD、发起考核、进度监控、状态流转 | 状态机驱动、时间窗口控制、按部门协作开关 |
+| **评分管理** | 生成评分表、接收评分、自动汇总计算 | 加权算法、差异校验、锁定机制、草稿暂存 |
+| **审批流程** | 多级审批、异常标红、通过/驳回/打回 | 审批链配置、审批记录留痕、审批详情 |
+| **报表分析** | 等级分布、历史趋势、绩效档案 | ECharts 渲染、PDF/Excel 导出、强制分布调整 |
+| **申诉管理** | 申诉发起、复核、结果变更 | 申诉绑定考核记录、审批联动、复核详情抽屉 |
+| **绩效面谈** | 面谈记录、历史关联、改进计划 | 待面谈列表、富文本记录、C/D 等级必填 |
+| **通知模块** | 系统通知生成、推送、已读管理 | 催促通知、状态变更通知、站内信列表 |
+| **系统配置** | 全局规则配置、权重、豁免、开关 | 等级规则、维度权重、评价人权重、小部门豁免、协作开关 |
+| **数据归档** | 考核周期归档、PDF 档案生成、数据锁定 | 归档后只读、全量 PDF 档案、Excel 多维度导出 |
+
 
 ---
 
@@ -361,6 +468,105 @@
 - **面谈记录表单**：员工信息（只读）、面谈时间（日期选择器）、面谈地点、沟通内容（富文本）、改进计划（C/D 等级必填，字数 ≥50）。
 - **历史面谈关联**：下方折叠面板显示该员工历次面谈记录，供上级参考。
 
+**（8）系统配置页（System Config）—— admin 视角（覆盖 Story-01~04）**
+- **页面结构**：采用 Element Plus `el-tabs` 五 Tab 布局，分别为「等级规则」「维度权重」「评价人权重」「小部门豁免」「协作评分开关」。
+- **等级规则配置**：每个等级（A/B/C/D）展示为独立表单行，含「最低分」「最高分」两个 `el-input-number`（精度 0.1），保存时前端校验：① 区间不重叠（A.min > B.max 等），② 区间连续（A.min 应等于 B.max + 0.1），③ 边界在 0-100 之间。
+- **维度权重配置**：工作业绩 / 工作能力 / 工作态度三个 `el-input-number`（0-100，精度 0），下方实时显示 `el-tag` 合计：合计 ≠ 100% 时显示红色「应为 100%」，合计 = 100% 时显示绿色「正确」。不满足 100% 时保存按钮置灰。
+- **评价人权重配置**：自评 / 上级 / 协作三个 `el-input-number`，校验逻辑同维度权重，三项合计必须严格等于 100%。
+- **小部门豁免配置**：部门人数阈值（0-50 人）+ 开关 `el-switch`。开启后，人数 ≤ 阈值的部门在强制分布时自动豁免（不执行降级）。
+- **协作评分开关**：全局默认值 `el-switch`，关闭后新创建的考核周期默认不启用协作评分。下方显示 `el-alert` 提示：「关闭不影响已创建的考核周期」。
+- **保存反馈**：每个 Tab 独立保存，保存成功后顶部 `ElMessage` 绿色提示，失败时保留当前表单数据并显示具体错误（如「A 等级最高分必须大于最低分」）。
+
+**（9）岗位 KPI 模板管理页（KPI Template）—— admin 视角（覆盖 Story-05）**
+- **岗位选择器**：顶部 `el-cascader` 级联选择部门 → 岗位，选择后右侧展示该岗位当前 KPI 模板列表。
+- **模板列表**：表格列含「指标名称 | 权重 | 目标值 | 计分方式 | 评分标准说明 | 操作」。权重列显示进度条，合计权重 ≠ 100% 时表头显示红色警告「当前合计 XX%，应为 100%」。
+- **增删改交互**：
+  - 新增：弹窗表单，含指标名称、权重（输入后自动重新计算剩余可分配权重）、目标值、计分方式（下拉：百分比/数值/达成率）、评分标准说明（文本域）。
+  - 编辑：行内点击「编辑」，当前行变为可编辑状态（Element `el-table` 行内编辑），修改后按回车或点击「保存」提交。
+  - 删除：点击删除时二次确认 `ElMessageBox`，若该模板已被某考核周期引用（`kpi_snapshot` 存在），则提示「该模板已被使用，删除后不影响历史考核，仅影响新周期」。
+- **模板预览**：右侧提供「考核时员工视角预览」按钮，弹窗展示该岗位员工在自评页面看到的 KPI 列表（含目标值、权重、评分锚点）。
+
+**（10）部门与岗位管理页（Organization）—— admin 视角（覆盖 Story-07）**
+- **左侧部门树**：`el-tree` 展示组织架构，支持拖拽调整父子关系。右键菜单提供「新增子部门」「编辑」「删除」。删除时校验：若该部门下存在员工，则禁止删除并提示「请先转移员工至其他部门」。
+- **右侧岗位列表**：选中部门后，展示该部门下的岗位列表（表格：岗位名称 | 编制人数 | 操作）。
+- **岗位操作**：新增岗位（弹窗输入岗位名称）、编辑、删除。删除时校验：若该岗位存在员工或已绑定 KPI 模板，则禁止删除并提示具体原因。
+- **部门负责人设置**：点击部门节点右侧「设置负责人」按钮，弹出员工选择器（`el-select` 过滤），仅允许选择 `role='manager'` 的员工。设置成功后部门树节点显示负责人姓名标签。
+
+**（11）考核周期管理页（Assessment Cycle）—— HR 视角（覆盖 Story-08~09）**
+- **周期列表**：表格展示历史考核周期，列含「周期名称 | 类型 | 起止日期 | 状态 | 参与人数 | 进度 | 操作」。状态列使用 `el-tag` 着色：not_started=灰色、pending_self=蓝色、pending_summary=橙色、published=绿色、archived=深灰。进度列显示当前阶段（如「自评 80%」）。
+- **创建考核周期**：点击「创建周期」进入三步向导：
+  - Step 1「基本信息」：周期名称（如「2026 年 Q1 季度考核」）、考核类型（季度/年度，单选）、起止日期（`el-date-picker` 范围选择）。
+  - Step 2「截止时间」：自评截止日、上级评分截止日、协作评分截止日三个日期选择器。前端校验：截止时间必须晚于起止日期，且自评 < 上级评 < 协作评。
+  - Step 3「考核对象」：左侧部门树（复选框），勾选后右侧实时统计「预计参与人数」。下方显示「协作评分开关」继承全局配置，但可按部门单独覆盖（研发部关闭、产品部开启）。
+- **启动考核**：创建后状态为 `not_started`，在列表页点击「启动」按钮，二次确认弹窗：「启动后将自动为 XX 人生成评分表，进入自评阶段，是否确认？」。启动后状态变为 `pending_self`，并自动向所有参与员工发送系统通知。
+- **周期详情抽屉**：点击周期名称，从右侧滑出详情抽屉，展示：① 参与人员列表（可中途增删，新增人员自动生成评分表）；② 各阶段进度条；③ 当前状态与下一可用操作按钮（如「触发汇总」「发布结果」「归档」）。
+- **仪表盘进度查看**：在周期列表中点击「查看进度」跳转仪表盘，展示各部门完成率（研发部自评 12/15 人、产品部 9/10 人等）。
+
+**（12）上级评分列表页（Manager Score List）—— manager 视角（覆盖 Story-12）**
+- **列表与详情分离**：本页为列表页，点击「评分」按钮后进入（1）评分详情页（Score Sheet）。解决「列表浏览」与「深度评分」的场景分离。
+- **待评分表格**：列含「员工姓名 | 工号 | 部门 | 自评状态 | 自评得分 | 操作」。
+  - 自评状态：「已完成」显示绿色标签，「未提交」显示灰色标签，「已逾期」显示红色标签。
+  - 操作列：已自评的显示「开始评分」按钮；未自评的显示「催促」按钮（发送系统通知提醒员工）。
+- **评分进度看板**：列表顶部显示统计卡片：「待评分 X 人 | 已完成 Y 人 | 逾期 Z 人」。
+- **快捷筛选**：顶部提供「全部 / 待评分 / 已评分 / 已逾期」快捷 Tab，支持按员工姓名搜索。
+- **批量催促**：勾选多名未自评员工，点击「批量催促」发送统一通知。
+- **协作评分状态列**：若该考核周期启用协作评分，则表格额外显示「协作人分配状态」列：未分配时显示「未分配」红色标签，点击后弹出协作人选择器（见下文 Story-14 补充）。
+
+**（13）申诉管理页（Appeal Management）—— HR 视角（覆盖 Story-23）**
+- **申诉列表**：表格展示所有申诉记录，列含「申诉人 | 考核周期 | 申诉时间 | 申诉理由 | 状态 | 操作」。状态：待复核（红色）、已维持（灰色）、已修改（绿色）。
+- **申诉详情抽屉**：点击行进入详情，右侧滑出抽屉，分三栏：
+  - 左栏「申诉信息」：申诉人基本信息、申诉理由全文、附件（如有）。
+  - 中栏「评分数据复核」：只读展示该员工的三维度原始分（自评/上级评/协作评）、加权计算过程、总分、等级、强制分布记录（如有降级，显示降级原因）。
+  - 右栏「复核操作」：HR 填写复核结论（文本域，不少于 20 字），选择复核结果「维持原结果」或「修改结果」。若选择修改，需填写修改后的等级并二次确认。底部「提交复核」按钮。
+- **复核结果通知**：提交后系统自动通知申诉人，申诉人在「我的绩效」中查看复核结论。
+- **申诉统计看板**：页面顶部显示统计卡片「本月申诉数 | 待复核数 | 维持率 | 修改率」。
+
+**（14）高管仪表盘（Executive Dashboard）—— executive 视角（覆盖 Story-24）**
+- **全局只读视图**：页面无任何操作按钮（无评分、无审批、无配置入口），仅展示统计卡片与图表。
+- **顶部统计卡片**：四列布局——员工总数、本季度考核覆盖率、公司平均绩效总分、各部门平均分差值。
+- **绩效分布饼图**：ECharts 饼图，展示 A/B/C/D 四等级占比，支持点击下钻到部门级分布。
+- **部门平均分对比柱状图**：X 轴为部门，Y 轴为平均分，鼠标悬停显示具体数值，支持按「总分 / 业绩 / 能力 / 态度」切换维度。
+- **绩效趋势折线图**：近 4-8 个季度公司平均总分变化，支持叠加显示各部门趋势线。
+- **强制调整人员列表**：下方折叠面板，展示本季度因强制分布被降级的员工名单（标红显示），含「姓名 | 部门 | 原始等级 | 调整后等级 | 降级原因」。
+- **周期切换**：顶部提供考核周期下拉选择器（如「2026 Q1 | 2025 年度」），切换后全页面数据联动刷新。
+- **数据导出**：仅提供「导出统计报表（Excel）」按钮，导出当前视图数据。
+
+---
+
+> **补充说明：以下内容为已覆盖 Story 的交互设计补充，完善原有设计细节。**
+
+**（补充 A）员工日常 CRUD（Employee Management）—— HR 视角（补充 Story-06 剩余部分）**
+- **员工列表页**：在（6）批量导入的基础上，增加「员工日常管理」页面（`EmployeeList.vue`）。
+- **表格列**：工号 | 姓名 | 部门 | 岗位 | 直属上级 | 状态（在职/离职） | 操作。
+- **单条增删改**：
+  - 新增：弹窗表单，含姓名、工号（唯一校验）、部门（下拉）、岗位（级联）、直属上级（`el-select` 按部门和角色过滤，仅 `manager` 可选）、邮箱、手机号。提交时校验直属上级工号是否存在于系统中。
+  - 编辑：点击「编辑」，弹窗回填数据，工号不可修改。若修改部门/岗位，系统提示「修改后仅影响新考核周期，当前进行中的考核保持原部门/岗位快照」。
+  - 离职/删除：点击「离职」将 `is_active` 置为 false，当前考核周期中该员工标记为「已离职」但不删除记录；点击「删除」仅在员工无考核记录时允许，否则仅可标记离职。
+- **搜索与筛选**：顶部支持按姓名/工号搜索、按部门筛选、按状态筛选。
+
+**（补充 B）协作人分配交互（补充 Story-14）**
+- **分配时机**：经理在（1）评分页完成打分并点击「提交评分」时，若该考核周期启用了协作评分且尚未分配协作人，则弹窗拦截：「请先分配协作评分人，再提交评分」。
+- **协作人选择器**：弹窗内展示「已选协作人」区域（初始为空），下方提供搜索框（按姓名/工号搜索全公司员工，排除当前被评人本人及其直属上级）。选中后显示为 `el-tag` 标签，支持点击 × 移除。
+- **限制规则**：最多分配 3 名协作人；协作人不能与被评人同部门（体现跨部门协作）；系统自动校验「协作人是否已为该员工评分」，若已评分则不可移除。
+- **快速提交**：分配完成后，点击「确认并提交评分」，系统同步创建 `peer_reviewers` 记录并提交评分，状态流转为 `pending_peer`。
+
+**（补充 C）申诉表单交互（补充 Story-22）**
+- **入口**：在（4）我的绩效页面，当前考核结果卡片下方常驻「对结果有异议？」按钮，点击后展开申诉表单（非弹窗，页面内折叠展开）。
+- **表单字段**：
+  - 申诉理由：下拉选择（「评分标准不统一」「计算结果有误」「强制分布不合理」「其他」），选择「其他」时显示详细描述文本框。
+  - 详细描述：文本域，不少于 30 字，实时显示字数统计。
+  - 期望等级：下拉选择 A/B/C/D（可选，非必填）。
+  - 证据附件：可选上传图片/PDF（MVP 可暂不支持，预留上传区域）。
+- **提交校验**：申诉理由和详细描述必填，字数达标。提交后二次确认：「申诉提交后将由 HR 复核，期间结果暂不变更，是否确认？」。
+- **提交后状态**：系统状态变为 `appealed`，申诉按钮区域变为「申诉已提交，正在复核中」灰色提示，不可再次提交。
+- **结果回显**：HR 复核完成后，员工在「我的绩效」中查看复核结论（维持/修改），结论下方显示 HR 填写的复核意见全文。
+
+**（补充 D）考核归档与报表导出（补充 Story-25）**
+- **归档操作**：在（11）考核周期详情抽屉中，状态为 `published` 时显示「归档」按钮。点击后二次确认：「归档后该考核周期将锁定，所有记录不可修改，仅可查看和导出，是否确认？」。确认后状态变为 `archived`，所有 `assessment_records` 的 `is_locked` 置为 true。
+- **归档记录**：列表中 `archived` 状态的周期显示「已归档」深灰标签，操作列仅剩「查看详情」「导出报表」。
+- **PDF 档案生成**：在「我的绩效」或 HR 报表页面，点击「生成 PDF 档案」，系统生成包含以下内容的 PDF：员工基本信息、考核周期信息、三维度得分明细、KPI 逐项评分、加权计算过程、最终等级、经理评语、面谈记录、申诉记录（如有）。PDF 页眉显示「机密—绩效考核档案」，页脚显示生成时间和档案编号。
+- **Excel 报表导出**：在（2）汇总页和（11）考核周期页面均支持导出。导出内容可选：① 员工汇总表（全部字段）② 部门统计表（平均分、等级分布）③ 审批记录表 ④ 申诉记录表。支持按部门/等级筛选后导出。
+
 #### 2.3.3 交互一致性规范
 - **全局导航栏**：顶部固定，左侧 Logo + 系统名称，右侧显示当前用户角色 + 姓名 + 消息铃铛（红点提示待办数量）。
 - **面包屑导航**：每个页面顶部显示当前位置，如「考核管理 > 2026Q2 考核 > 分数汇总」。
@@ -376,14 +582,14 @@
 ┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
 │   Department    │ 1:M   │    Employee     │ 1:M   │AssessmentRecord │
 │  (部门)         │───────│   (员工)        │───────│  (考核记录)      │
-└─────────────────┘       └─────────────────┘       └────────┬────────┘
+└────────┬────────┘       └────────┬────────┘       └────────┬────────┘
        │                           │                         │
        │                           │ 1:M                     │ 1:M
        │                           ▼                         ▼
        │                    ┌─────────────────┐       ┌─────────────────┐
        │                    │  Position       │       │   ScoreDetail   │
        │                    │  (岗位)          │       │  (评分明细)      │
-       │                    └─────────────────┘       └─────────────────┘
+       │                    └────────┬────────┘       └─────────────────┘
        │                           │                         │
        │                           │ 1:M                     │
        │                           ▼                         │
@@ -397,13 +603,33 @@
 ┌─────────────────┐       ┌─────────────────┐
 │   AssessmentCycle│ 1:M  │  PeerReviewer   │
 │  (考核周期)      │───────│  (协作评分关系)   │
-└─────────────────┘       └─────────────────┘
+└────────┬────────┘       └────────┬────────┘
        │                           │
        │ 1:M                       │ 1:M
        ▼                           ▼
 ┌─────────────────┐       ┌─────────────────┐
 │  ApprovalRecord │       │  AppealRecord   │
 │  (审批记录)      │       │  (申诉记录)      │
+└─────────────────┘       └─────────────────┘
+       │
+       │ 1:M
+       ▼
+┌─────────────────┐       ┌─────────────────┐
+│  InterviewRecord│       │  ScoreDraft     │
+│  (面谈记录)      │       │  (评分草稿)      │
+└─────────────────┘       └─────────────────┘
+       │
+       │ 1:M
+       ▼
+┌─────────────────┐
+│  Notification   │
+│  (系统通知)      │
+└─────────────────┘
+
+独立配置表（无直接外键关联，通过 config_key 读取）：
+┌─────────────────┐       ┌─────────────────┐
+│  SystemConfig   │       │  CycleDepartment│
+│ (全局系统配置)   │       │ (周期部门配置)   │
 └─────────────────┘       └─────────────────┘
 ```
 
@@ -437,11 +663,14 @@ CREATE TABLE employees (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     employee_no     VARCHAR(50) UNIQUE NOT NULL,  -- 工号
     name            VARCHAR(100) NOT NULL,        -- 姓名
+    email           VARCHAR(255),                   -- 邮箱
+    phone           VARCHAR(20),                    -- 手机号
     department_id   INTEGER,                       -- 部门ID
     position_id     INTEGER,                       -- 岗位ID
     manager_id      INTEGER,                       -- 直属上级ID
-    is_department_head BOOLEAN DEFAULT FALSE,      -- 是否部门负责人（用于审批链）
     is_active       BOOLEAN DEFAULT TRUE,          -- 是否在职
+    leave_date      DATE,                           -- 离职日期
+    leave_reason    VARCHAR(255),                  -- 离职原因
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
@@ -460,9 +689,11 @@ CREATE TABLE assessment_cycles (
     status          VARCHAR(50) DEFAULT 'not_started', -- 状态
     dimension_weights TEXT NOT NULL,               -- JSON: {"performance":0.6,"ability":0.2,"attitude":0.2}
     reviewer_weights TEXT NOT NULL,                -- JSON: 评分人权重
-    grade_rules     TEXT NOT NULL,                 -- JSON: 等级规则
+    grade_rules     TEXT NOT NULL,                 -- JSON: 等级规则 {"A":{"min":90,"max":100,"max_ratio":0.2},...}（含分数区间和等级人数比例上限）
     is_distribution_enabled BOOLEAN DEFAULT TRUE,  -- 是否启用强制分布（MVP默认开启）
-    small_dept_exemption BOOLEAN DEFAULT TRUE,     -- 小部门豁免（≤5人时放宽）
+    small_dept_exemption BOOLEAN DEFAULT TRUE,     -- 小部门豁免开关
+    small_dept_threshold INTEGER DEFAULT 5,      -- 小部门豁免阈值（默认5人）
+    peer_review_enabled BOOLEAN DEFAULT TRUE,      -- 本周期是否启用协作评分
     approval_chain_config TEXT,                    -- JSON: 审批链配置
     is_locked       BOOLEAN DEFAULT FALSE,         -- 已归档锁定
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -510,8 +741,6 @@ CREATE TABLE assessment_records (
     original_grade       VARCHAR(10),                -- 强制调整前的原始等级（用于追溯）
     
     manager_comment     TEXT,                        -- 上级综合评语
-    interview_record    TEXT,                        -- JSON: 面谈记录
-    appeal_record       TEXT,                        -- JSON: 申诉记录
     
     status              VARCHAR(50) DEFAULT 'pending_self', -- 考核状态
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -650,6 +879,86 @@ CREATE TABLE interview_records (
 
 ---
 
+#### 3.2.15 `system_configs` — 全局系统配置表
+
+存储系统级默认配置，新创建考核周期时继承这些默认值。支持等级规则、维度权重、评价人权重、协作评分开关、小部门豁免阈值等全局配置。
+
+```sql
+CREATE TABLE system_configs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    config_key  VARCHAR(100) UNIQUE NOT NULL,   -- 配置项键名：grade_rules, dimension_weights, reviewer_weights, peer_review_enabled, small_dept_threshold
+    config_value TEXT NOT NULL,                -- JSON 配置值
+    description  VARCHAR(255),                  -- 配置说明
+    updated_by   INTEGER,                       -- 最后修改人ID
+    updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+> **初始化数据建议**：
+> - `grade_rules`: `{"A":{"min":90,"max":100,"max_ratio":0.2},"B":{"min":80,"max":89.9,"max_ratio":0.5},"C":{"min":60,"max":79.9,"max_ratio":0.25},"D":{"min":0,"max":59.9,"max_ratio":0.05}}`
+> - `dimension_weights`: `{"performance":0.6,"ability":0.2,"attitude":0.2}`
+> - `reviewer_weights`: `{"self":0.1,"manager":0.7,"peer":0.2}`
+> - `peer_review_enabled`: `true`
+> - `small_dept_threshold`: `5`
+
+---
+
+#### 3.2.16 `score_drafts` — 评分草稿表
+
+存储自评、上级评分、协作评分的草稿数据，支持随时保存和恢复，与正式提交数据隔离。
+
+```sql
+CREATE TABLE score_drafts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_id       INTEGER NOT NULL,          -- 关联考核记录ID
+    scorer_type     VARCHAR(20) NOT NULL,       -- 评分人类型：self / manager / peer
+    scorer_id       INTEGER NOT NULL,           -- 评分人ID（员工ID或用户ID）
+    draft_data      TEXT NOT NULL,             -- JSON: 完整的草稿评分数据
+    saved_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(record_id, scorer_type, scorer_id)
+);
+```
+
+---
+
+#### 3.2.17 `cycle_departments` — 考核周期部门配置表
+
+记录每个考核周期中各部门的独立配置，支持按部门控制协作评分开关等差异化设置。
+
+```sql
+CREATE TABLE cycle_departments (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id            INTEGER NOT NULL,       -- 考核周期ID
+    department_id       INTEGER NOT NULL,       -- 部门ID
+    peer_review_enabled BOOLEAN DEFAULT TRUE,   -- 该部门在本周期是否启用协作评分
+    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(cycle_id, department_id)
+);
+```
+
+> **业务说明**：创建考核周期时，默认继承全局 `peer_review_enabled` 设置。HR 可在创建向导中为特定部门单独覆盖此开关，实现"研发部关闭协作评分，产品部开启"的需求。
+
+---
+
+#### 3.2.18 `notifications` — 系统通知表
+
+存储系统通知消息，支持考核启动、结果发布、申诉处理等事件的通知推送。
+
+```sql
+CREATE TABLE notifications (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id             INTEGER NOT NULL,       -- 接收用户ID
+    title               VARCHAR(255) NOT NULL,  -- 通知标题
+    content             TEXT,                    -- 通知内容
+    type                VARCHAR(50),             -- 通知类型：assessment_start / result_published / appeal_result / deadline_reminder / nudge
+    related_record_id   INTEGER,                -- 关联考核记录ID（可选）
+    is_read             BOOLEAN DEFAULT FALSE,  -- 是否已读
+    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
 ## 4. 接口设计 (REST API)
 
 ### 4.1 接口规范
@@ -683,8 +992,8 @@ CREATE TABLE interview_records (
 | GET | `/employees/import-template` | 下载批量导入模板 | admin/hr |
 | POST | `/employees/import` | Excel 导入 | admin/hr |
 | POST | `/employees/import-preview` | 导入预览（校验不保存） | admin/hr |
+| POST | `/employees/{id}/nudge` | 催促员工提交评分 | manager/hr |
 | GET | `/employees/{id}/subordinates` | 获取下属 | manager |
-
 #### 考核周期管理
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
@@ -692,6 +1001,11 @@ CREATE TABLE interview_records (
 | POST | `/cycles` | 创建周期 | admin |
 | PUT | `/cycles/{id}` | 修改周期 | admin |
 | POST | `/cycles/{id}/launch` | 发起考核 | admin/hr |
+| POST | `/cycles/{id}/publish` | 发布结果 | admin/hr |
+| POST | `/cycles/{id}/archive` | 归档周期 | admin/hr |
+| POST | `/cycles/{id}/nudge-batch` | 批量催促逾期提交 | admin/hr |
+| GET | `/cycles/{id}/departments` | 获取周期各部门协作评分开关 | admin/hr |
+| PUT | `/cycles/{id}/departments/{department_id}` | 设置部门协作评分开关 | admin/hr |
 | GET | `/cycles/{id}/progress` | 进度监控 | admin/hr |
 
 #### 评分管理
@@ -701,14 +1015,17 @@ CREATE TABLE interview_records (
 | POST | `/scores/self` | 提交自评 | employee |
 | GET | `/scores/to-review` | 待评列表 | manager |
 | POST | `/scores/manager/{record_id}` | 提交上级评分 | manager |
+| POST | `/scores/manager/{record_id}/peers` | 为考核人分配协作评分人 | manager |
 | POST | `/scores/peer/{record_id}` | 提交协作评分 | peer |
 | GET | `/scores/summary/{cycle_id}` | 分数汇总表 | admin/hr/manager |
 | POST | `/scores/calculate/{cycle_id}` | 触发汇总计算 | admin/hr |
+| POST | `/scores/calculate/{cycle_id}/distribute` | 强制分布确认与提交 | admin/hr |
 
 #### 审批流程
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
 | GET | `/approvals/pending` | 我的待审批 | manager/hr |
+| GET | `/approvals/record/{record_id}` | 审批详情（含评分数据） | manager/hr |
 | POST | `/approvals/{record_id}/approve` | 通过 | 审批人 |
 | POST | `/approvals/{record_id}/reject` | 驳回 | 审批人 |
 | POST | `/approvals/{record_id}/rollback` | 打回重评 | 审批人 |
@@ -726,6 +1043,7 @@ CREATE TABLE interview_records (
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
 | GET | `/records/{record_id}` | 获取考核记录详情 | 本人/上级/hr |
+| GET | `/records/my-records` | 我的考核历史列表 | employee |
 | PUT | `/records/{record_id}/status` | 修改考核记录状态（HR强制流转） | admin/hr |
 | POST | `/records/{record_id}/draft` | 保存评分草稿 | employee/manager/peer |
 | GET | `/records/{record_id}/draft` | 获取评分草稿 | employee/manager/peer |
@@ -755,6 +1073,7 @@ CREATE TABLE interview_records (
 | GET | `/departments` | 部门列表 | 登录用户 |
 | POST | `/departments` | 新增部门 | admin/hr |
 | PUT | `/departments/{id}` | 修改部门 | admin/hr |
+| PUT | `/departments/{id}/head` | 设置部门负责人 | admin/hr |
 | DELETE | `/departments/{id}` | 删除部门 | admin/hr |
 | GET | `/positions` | 岗位列表 | 登录用户 |
 | POST | `/positions` | 新增岗位 | admin/hr |
@@ -798,6 +1117,14 @@ CREATE TABLE interview_records (
 | PUT | `/config/small-dept-exemption` | 更新小部门豁免配置 | admin |
 | GET | `/config/peer-review-enabled` | 获取协作评分开关全局默认值 | admin |
 | PUT | `/config/peer-review-enabled` | 更新协作评分开关全局默认值 | admin |
+
+#### 通知消息
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/notifications` | 我的通知消息列表 | 登录用户 |
+| PUT | `/notifications/{id}/read` | 标记单条通知已读 | 登录用户 |
+| PUT | `/notifications/read-all` | 标记所有通知已读 | 登录用户 |
+
 #### 首页仪表盘与统计
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
@@ -833,46 +1160,59 @@ CREATE TABLE interview_records (
 ### 5.1 加权总分计算算法
 
 ```python
-def calculate_weighted_score(record: AssessmentRecord) -> dict:
+def calculate_weighted_score(record_id: int, db: Session) -> dict:
     """
     计算加权总分与各维度加权分
+    从 score_details 表读取评分数据，支持 KPI 逐项聚合
     """
-    # 从考核周期读取权重配置
+    record = db.query(AssessmentRecord).get(record_id)
     dim_weights = json.loads(record.cycle.dimension_weights)  # {"performance":0.6, "ability":0.2, "attitude":0.2}
     reviewer_weights = json.loads(record.cycle.reviewer_weights)
-    # reviewer_weights 示例:
-    # {
-    #   "performance": {"self": 0.3, "manager": 0.7},
-    #   "ability": {"self": 0.2, "manager": 0.6, "peer": 0.2},
-    #   "attitude": {"self": 0.2, "manager": 0.8}
-    # }
     
     result = {}
     for dimension, dim_weight in dim_weights.items():
-        # 获取该维度下各评分人的分数
-        scores = {
-            "self": getattr(record, "self_scores", {}).get(dimension),
-            "manager": getattr(record, "manager_scores", {}).get(dimension),
-            "peer": getattr(record, "peer_scores", {}).get(dimension),
-        }
+        # 从 score_details 表查询该维度下各评分人的分数
+        scores = {}
+        for reviewer_type in ["self", "manager", "peer"]:
+            score_detail = db.query(ScoreDetail).filter_by(
+                record_id=record_id, 
+                dimension=dimension, 
+                reviewer_type=reviewer_type
+            ).first()
+            scores[reviewer_type] = score_detail.score if score_detail else None
+        
         # 加权计算（仅取已提交的评分）
-        rw = reviewer_weights[dimension]
+        rw = reviewer_weights.get(dimension, reviewer_weights)  # 支持维度级权重配置
+        if isinstance(rw, dict) and "self" in rw:
+            # 旧格式兼容：维度级统一权重
+            pass
+        else:
+            # 新格式：每个维度有独立的评分人权重
+            rw = reviewer_weights.get(dimension, {})
+        
         total_w = 0
         weighted_sum = 0
         for reviewer, score in scores.items():
             if score is not None and reviewer in rw:
                 weighted_sum += score * rw[reviewer]
                 total_w += rw[reviewer]
+        
         # 归一化：如果某评分人未提交，将其权重按比例分配给已提交人
         if total_w > 0 and total_w < 1.0:
             weighted_sum = weighted_sum / total_w
+        
         result[dimension] = round(weighted_sum, 1)
     
     # 计算总分
-    total = sum(result[d] * dim_weights[d] for d in result)
+    total = sum(result[d] * dim_weights[d] for d in result if d in dim_weights)
     result["total"] = round(total, 1)
     return result
 ```
+
+> **关键修正**：
+> - 改为从 `score_details` 表查询评分，与数据库设计对齐
+> - 业绩维度（`performance`）的得分由 **5.6 KPI 聚合算法** 先计算，再写入 `score_details`，本算法仅做维度级加权
+> - 支持按维度独立的评分人权重配置（ability 维度的协作权重可能不同于 performance 维度）
 
 ### 5.2 等级映射算法
 
@@ -882,32 +1222,90 @@ def map_grade(total_score: float, grade_rules: dict) -> str:
     根据总分映射等级
     grade_rules 示例: {"A": {"min": 90, "max": 100}, "B": {"min": 80, "max": 89.9}, ...}
     """
-    for grade, rule in grade_rules.items():
+    # 按 min 降序遍历，确保高分优先匹配
+    sorted_grades = sorted(grade_rules.items(), key=lambda x: x[1]["min"], reverse=True)
+    for grade, rule in sorted_grades:
         if rule["min"] <= total_score <= rule["max"]:
             return grade
     return "D"  # 默认兜底
+
+
+def map_grade_with_adjustment(record: AssessmentRecord, grade_rules: dict) -> tuple:
+    """
+    映射等级并处理强制分布调整
+    返回: (原始等级, 调整后等级, 是否被强制调整)
+    """
+    original = map_grade(record.total_score, grade_rules)
+    
+    # 如果已存在强制分布调整，返回调整后的等级
+    if record.adjusted_level and record.adjusted_level != original:
+        return original, record.adjusted_level, True
+    
+    return original, original, False
 ```
+
+> **关键修正**：
+> - 增加按 `min` 降序遍历，确保 A(90) → B(80) → C(60) → D(0) 的优先级
+> - 增加 `map_grade_with_adjustment` 函数，支持强制分布调整后的 `adjusted_level` 字段
+> - 所有被强制调整的记录保留 `original_grade` 快照，用于审计追溯
 
 ### 5.3 异常分数检测
 
 ```python
-def detect_anomalies(record: AssessmentRecord) -> list:
+def detect_anomalies(record_id: int, db: Session, config: dict) -> list:
     """
     检测异常分数并返回标红提示
+    支持配置化阈值（从 system_configs 读取）
     """
     alerts = []
-    if record.total_score and (record.total_score < 60 or record.total_score > 98):
+    record = db.query(AssessmentRecord).get(record_id)
+    
+    # 读取配置阈值（默认：总分 < 60 或 > 98 为异常）
+    low_threshold = config.get("anomaly_low_threshold", 60)
+    high_threshold = config.get("anomaly_high_threshold", 98)
+    diff_threshold = config.get("anomaly_diff_threshold", 20)
+    
+    # 总分异常
+    if record.total_score and (record.total_score < low_threshold or record.total_score > high_threshold):
         alerts.append(f"总分异常: {record.total_score}")
     
-    # 上级评分与自评分差异超过20分
-    if record.manager_scores and record.self_scores:
-        for dim in ["performance", "ability", "attitude"]:
-            m_score = record.manager_scores.get(dim, 0)
-            s_score = record.self_scores.get(dim, 0)
-            if abs(m_score - s_score) > 20:
-                alerts.append(f"维度[{dim}] 上级评分与自评分差异过大: {m_score} vs {s_score}")
+    # 从 score_details 查询各维度评分
+    def get_scores_by_reviewer(reviewer_type: str) -> dict:
+        details = db.query(ScoreDetail).filter_by(record_id=record_id, reviewer_type=reviewer_type).all()
+        return {d.dimension: d.score for d in details}
+    
+    self_scores = get_scores_by_reviewer("self")
+    manager_scores = get_scores_by_reviewer("manager")
+    peer_scores = get_scores_by_reviewer("peer")
+    
+    # 上级评分与自评分差异过大
+    for dim in ["performance", "ability", "attitude"]:
+        m_score = manager_scores.get(dim)
+        s_score = self_scores.get(dim)
+        if m_score is not None and s_score is not None and abs(m_score - s_score) > diff_threshold:
+            alerts.append(f"维度[{dim}] 上级评分与自评分差异过大: {m_score} vs {s_score}")
+    
+    # 协作评分与自评分差异过大
+    for dim in ["performance", "ability", "attitude"]:
+        p_score = peer_scores.get(dim)
+        s_score = self_scores.get(dim)
+        if p_score is not None and s_score is not None and abs(p_score - s_score) > diff_threshold:
+            alerts.append(f"维度[{dim}] 协作评分与自评分差异过大: {p_score} vs {s_score}")
+    
+    # 同一维度多评分人差异过大（上级 vs 协作人）
+    for dim in ["performance", "ability", "attitude"]:
+        m_score = manager_scores.get(dim)
+        p_score = peer_scores.get(dim)
+        if m_score is not None and p_score is not None and abs(m_score - p_score) > diff_threshold:
+            alerts.append(f"维度[{dim}] 上级评分与协作评分差异过大: {m_score} vs {p_score}")
+    
     return alerts
 ```
+
+> **关键修正**：
+> - 改为从 `score_details` 表查询评分，与数据库设计对齐
+> - 阈值（60/98/20）改为从 `system_configs` 配置读取，支持不同企业标准
+> - 新增协作评分与自评分、上级评分与协作评分的差异检测
 
 ### 5.4 考核状态机（完整版，含异常处理）
 
@@ -935,9 +1333,10 @@ pending_approval → pending_interview → published → [appealed] → archived
 | 强制分布不合规 + HR 确认调整 | `pending_distribution_review` | `pending_approval` | HR | HR 确认系统推荐的降级方案 |
 | 审批链 Step 1 通过 | `pending_approval` | `pending_approval` | 直属上级 | Step 1 确认后进入 Step 2 |
 | 审批链 Step 2 通过 | `pending_approval` | `pending_interview` | HR 负责人 | 最终审批通过，进入面谈阶段 |
+| HR 发布结果 | `pending_interview` | `published` | HR | 所有面谈完成后，HR 发布考核结果，员工可查看 |
 | 审批驳回 | `pending_approval` | `pending_manager` | 审批人 | 返回上级修改评分，保留历史审批记录 |
 | 审批打回重评 | `pending_approval` | `pending_self` | 审批人 | 清除所有评分数据，考核回到自评阶段 |
-| HR 发布归档 | `published` | `archived` | HR | 数据锁定，生成 PDF 档案 |
+| HR 归档周期 | `published` | `archived` | HR | 数据锁定，生成 PDF 档案，不可再修改 |
 
 #### 异常与边界处理
 
@@ -954,67 +1353,117 @@ pending_approval → pending_interview → published → [appealed] → archived
 
 ### 5.5 强制分布校验与调整算法
 
-系统在汇总阶段自动按部门执行强制分布校验，若超标则自动降级或拦截。
+系统在汇总阶段自动按部门执行强制分布校验，生成降级推荐方案，由 HR 确认后执行。
+
+**等级规则配置（含上限比例）**：
+```json
+{
+  "A": {"min": 90, "max": 100, "max_ratio": 0.20},
+  "B": {"min": 80, "max": 89.9, "max_ratio": 0.30},
+  "C": {"min": 60, "max": 79.9, "max_ratio": 0.40},
+  "D": {"min": 0, "max": 59.9, "max_ratio": 0.10}
+}
+```
 
 ```python
-def enforce_distribution(records, grade_rules, dept_size):
+def enforce_distribution_recommend(records, grade_rules, dept_size, small_dept_config=None):
     """
-    按部门强制分布规则校验并调整等级
+    第一步：系统生成强制分布降级推荐方案（不直接修改数据）
+    返回推荐方案供 HR 确认
     """
     from collections import Counter
     
     sorted_records = sorted(records, key=lambda r: r.total_score, reverse=True)
     
-    if dept_size <= 5:
+    # 小部门豁免：读取系统配置
+    if small_dept_config and small_dept_config.get("enabled") and dept_size <= small_dept_config.get("threshold", 5):
         caps = _small_dept_caps(dept_size)
     else:
-        caps = {grade: int(dept_size * rule["max_ratio"]) 
+        caps = {grade: max(1, int(dept_size * rule["max_ratio"])) 
                 for grade, rule in grade_rules.items()}
     
     grade_counts = Counter(r.grade for r in sorted_records)
     overflow = {g: max(0, grade_counts.get(g, 0) - caps.get(g, 0)) for g in caps}
     
-    adjustment_log = []
+    adjustment_recommendations = []
     for grade in ["A", "B", "C"]:
         if overflow[grade] > 0:
             candidates = [r for r in sorted_records if r.grade == grade]
-            candidates.sort(key=lambda r: r.total_score)
+            candidates.sort(key=lambda r: r.total_score)  # 从低分开始降级
             
             for i in range(overflow[grade]):
                 if i < len(candidates):
                     record = candidates[i]
                     next_grade = _get_next_lower_grade(grade)
-                    old_grade = record.grade
-                    
-                    if not record.original_grade:
-                        record.original_grade = old_grade
-                    
-                    record.grade = next_grade
-                    adjustment_log.append({
+                    adjustment_recommendations.append({
                         "employee_id": record.employee_id,
                         "total_score": record.total_score,
-                        "from_grade": old_grade,
+                        "from_grade": grade,
                         "to_grade": next_grade,
-                        "reason": f"因{grade}等级超限（上限{caps[grade]}人），系统自动降级"
+                        "reason": f"因{grade}等级超限（上限{caps[grade]}人，实际{grade_counts[grade]}人），建议降级至{next_grade}"
                     })
     
-    final_counts = Counter(r.grade for r in sorted_records)
-    is_compliant = all(final_counts.get(g, 0) <= caps.get(g, 0) for g in caps)
+    is_compliant = all(
+        max(0, grade_counts.get(g, 0) - overflow.get(g, 0)) <= caps.get(g, 0) 
+        for g in caps
+    )
     
     return {
-        "adjusted_records": sorted_records,
-        "adjustment_log": adjustment_log,
-        "is_compliant": is_compliant
+        "records": sorted_records,
+        "caps": caps,
+        "overflow": overflow,
+        "recommendations": adjustment_recommendations,
+        "is_compliant": is_compliant,
+        "requires_confirmation": len(adjustment_recommendations) > 0
     }
 
 
+def enforce_distribution_confirm(record_ids, recommendations, db: Session, confirmed_by: int):
+    """
+    第二步：HR 确认降级方案后执行（POST /scores/calculate/{cycle_id}/distribute）
+    """
+    adjustment_log = []
+    for rec in recommendations:
+        record = db.query(AssessmentRecord).get(rec["employee_id"])
+        if not record:
+            continue
+        
+        old_grade = record.grade
+        new_grade = rec["to_grade"]
+        
+        # 保留原始等级（仅首次调整时）
+        if not record.original_grade:
+            record.original_grade = old_grade
+        
+        record.grade = new_grade
+        record.adjusted_level = new_grade
+        record.adjusted_by = confirmed_by
+        record.adjusted_at = datetime.now()
+        
+        adjustment_log.append({
+            "employee_id": record.employee_id,
+            "total_score": record.total_score,
+            "from_grade": old_grade,
+            "to_grade": new_grade,
+            "reason": rec["reason"],
+            "confirmed_by": confirmed_by,
+            "confirmed_at": record.adjusted_at.isoformat()
+        })
+    
+    db.commit()
+    return adjustment_log
+
+
 def _small_dept_caps(dept_size):
+    """
+    小部门豁免规则：仅限制 A 和 D 各不超过 1 人，B/C 不限制
+    """
     if dept_size <= 1:
         return {"A": 1, "B": 1, "C": 1, "D": 1}
     elif dept_size <= 3:
-        return {"A": 1, "B": 10, "C": 10, "D": 1}
+        return {"A": 1, "B": dept_size, "C": dept_size, "D": 1}
     else:
-        return {"A": 1, "B": 10, "C": 10, "D": 1}
+        return {"A": 1, "B": dept_size, "C": dept_size, "D": 1}
 
 
 def _get_next_lower_grade(grade):
@@ -1023,11 +1472,721 @@ def _get_next_lower_grade(grade):
 ```
 
 **算法说明**：
-1. **按部门独立核算**：以 `department_id` 为维度分组统计。
-2. **小部门豁免**：部门人数 ≤5 时，仅限制 A 和 D 各不超过 1 人，B/C 不限制。
-3. **溢出降级策略**：从超限等级中按「总分由低到高」依次降级，确保高分者尽可能保留原等级。
-4. **原始等级保留**：所有被强制调整的记录，系统自动在 `original_grade` 中保留调整前等级，用于审计追溯。
-5. **降级日志**：每次降级操作记录详细日志，包含员工ID、总分、原始等级、调整后等级、降级原因，供审计追溯。
+1. **两步流程**：`enforce_distribution_recommend` 生成推荐方案（不修改数据）→ HR 确认 → `enforce_distribution_confirm` 执行降级并写入数据库。
+2. **按部门独立核算**：以 `department_id` 为维度分组统计。
+3. **小部门豁免**：从 `system_configs` 读取 `small_dept_exemption` 配置（阈值 + 开关），部门人数 ≤ 阈值时仅限制 A 和 D 各不超过 1 人，B/C 不限制。
+4. **溢出降级策略**：从超限等级中按「总分由低到高」依次降级，确保高分者尽可能保留原等级。
+5. **原始等级保留**：所有被强制调整的记录，系统在 `original_grade` 中保留调整前等级，`adjusted_level` 记录调整后等级，用于审计追溯。
+6. **降级日志**：每次降级操作记录详细日志，包含员工ID、总分、原始等级、调整后等级、降级原因、确认人、确认时间，供审计追溯。
+7. **手动干预**：HR 可在确认前逐条取消某些推荐降级，或手动添加额外的降级（如将某高分 C 保留为 C 而不降级）。
+
+---
+
+### 5.6 KPI 聚合算法
+
+业绩维度（`performance`）的得分由 KPI 模板逐项评分后加权聚合生成，而非直接打分。
+
+```python
+def calculate_kpi_performance_score(record_id: int, reviewer_type: str, db: Session) -> float:
+    """
+    计算业绩维度得分：Σ(KPI 评分 × KPI 权重) / Σ(KPI 权重)
+    """
+    kpi_scores = db.query(KpiSnapshot).filter_by(
+        record_id=record_id, 
+        reviewer_type=reviewer_type
+    ).all()
+    
+    if not kpi_scores:
+        return 0.0
+    
+    total_weight = sum(k.weight for k in kpi_scores)
+    if total_weight == 0:
+        return 0.0
+    
+    weighted_sum = sum(k.score * k.weight for k in kpi_scores if k.score is not None)
+    submitted_weight = sum(k.weight for k in kpi_scores if k.score is not None)
+    
+    if submitted_weight == 0:
+        return 0.0
+    
+    # 若部分 KPI 未评分，权重按比例归一化
+    return round(weighted_sum / submitted_weight, 1)
+
+
+def aggregate_kpi_scores(record_id: int, db: Session) -> dict:
+    """
+    聚合自评、上级评的 KPI 得分，分别写入 score_details
+    """
+    result = {}
+    for reviewer_type in ["self", "manager"]:
+        score = calculate_kpi_performance_score(record_id, reviewer_type, db)
+        result[reviewer_type] = score
+        
+        # 写入或更新 score_details
+        detail = db.query(ScoreDetail).filter_by(
+            record_id=record_id, dimension="performance", reviewer_type=reviewer_type
+        ).first()
+        if not detail:
+            detail = ScoreDetail(record_id=record_id, dimension="performance", reviewer_type=reviewer_type)
+            db.add(detail)
+        detail.score = score
+    
+    db.commit()
+    return result
+```
+
+> **关键说明**：
+> - KPI 逐项评分（项目交付准时率、代码质量、技术文档）由员工/上级分别打分
+> - 业绩维度得分 = Σ(KPI 评分 × KPI 权重) / Σ(KPI 权重)，支持部分 KPI 未评分时的权重归一化
+> - 聚合后的业绩维度得分写入 `score_details`，再由 **5.1 加权总分计算** 进行维度级加权
+
+---
+
+### 5.7 仪表盘统计聚合算法
+
+首页仪表盘需要实时聚合多维度统计数据。
+
+```python
+def get_dashboard_stats(user_role: str, user_id: int, db: Session) -> dict:
+    """
+    获取首页仪表盘统计数据
+    """
+    stats = {}
+    
+    if user_role in ["admin", "hr"]:
+        # 考核周期统计
+        stats["active_cycles"] = db.query(AssessmentCycle).filter(
+            AssessmentCycle.status.in_(["pending_self", "pending_manager", "pending_peer", "pending_summary", "pending_approval", "pending_interview"])
+        ).count()
+        
+        stats["pending_summary"] = db.query(AssessmentCycle).filter_by(status="pending_summary").count()
+        stats["pending_approval_step2"] = db.query(AssessmentRecord).filter_by(status="pending_approval").join(ApprovalRecord).filter(ApprovalRecord.step_index == 2, ApprovalRecord.action == None).count()
+        stats["pending_appeals"] = db.query(AppealRecord).filter_by(status="pending").count()
+        stats["distribution_violations"] = db.query(AssessmentRecord).filter_by(status="pending_distribution_review").count()
+        
+    if user_role == "manager":
+        # 待评分、待审批、待面谈
+        subordinate_ids = db.query(Employee.id).filter_by(manager_id=user_id).all()
+        subordinate_ids = [e.id for e in subordinate_ids]
+        
+        stats["pending_scores"] = db.query(AssessmentRecord).filter(
+            AssessmentRecord.employee_id.in_(subordinate_ids),
+            AssessmentRecord.status == "pending_manager"
+        ).count()
+        
+        stats["pending_approvals"] = db.query(AssessmentRecord).filter(
+            AssessmentRecord.employee_id.in_(subordinate_ids),
+            AssessmentRecord.status == "pending_approval"
+        ).join(ApprovalRecord).filter(ApprovalRecord.approver_id == user_id, ApprovalRecord.step_index == 1, ApprovalRecord.action == None).count()
+        
+        stats["pending_interviews"] = db.query(AssessmentRecord).filter(
+            AssessmentRecord.employee_id.in_(subordinate_ids),
+            AssessmentRecord.status == "pending_interview"
+        ).count()
+        
+        stats["subordinate_count"] = len(subordinate_ids)
+    
+    if user_role == "employee":
+        # 当前考核状态、历史记录数
+        current_record = db.query(AssessmentRecord).filter_by(employee_id=user_id).order_by(AssessmentRecord.created_at.desc()).first()
+        stats["current_status"] = current_record.status if current_record else "无考核"
+        stats["history_count"] = db.query(AssessmentRecord).filter_by(employee_id=user_id).count()
+        stats["appeal_count"] = db.query(AppealRecord).filter_by(employee_id=user_id).count()
+    
+    if user_role == "peer":
+        stats["pending_peer_reviews"] = db.query(PeerReviewer).filter_by(reviewer_id=user_id, status="pending").count()
+    
+    if user_role == "executive":
+        stats["total_employees"] = db.query(Employee).filter_by(is_active=True).count()
+        total_records = db.query(AssessmentRecord).filter_by(status="published").count()
+        active_records = db.query(AssessmentRecord).filter(AssessmentRecord.status.in_(["pending_self", "pending_manager", "pending_peer", "pending_summary", "pending_approval", "pending_interview"])).count()
+        stats["coverage_rate"] = round(active_records / stats["total_employees"] * 100, 1) if stats["total_employees"] > 0 else 0
+        
+        avg_score = db.query(func.avg(AssessmentRecord.total_score)).filter_by(status="published").scalar()
+        stats["company_avg_score"] = round(avg_score, 1) if avg_score else 0
+        
+        stats["forced_adjustments"] = db.query(AssessmentRecord).filter(
+            AssessmentRecord.original_grade != None,
+            AssessmentRecord.adjusted_level != None
+        ).count()
+    
+    return stats
+```
+
+---
+
+### 5.8 历史趋势计算算法
+
+近 4-8 个季度个人/部门绩效趋势聚合。
+
+```python
+def get_employee_trend(employee_id: int, quarters: int = 4, db: Session) -> list:
+    """
+    获取员工近 N 个季度的绩效趋势
+    返回: [{"cycle_name": "2026 Q1", "total_score": 85.5, "grade": "B", "dimensions": {...}}, ...]
+    """
+    records = db.query(AssessmentRecord).join(AssessmentCycle).filter(
+        AssessmentRecord.employee_id == employee_id,
+        AssessmentRecord.status.in_(["published", "archived"])
+    ).order_by(AssessmentCycle.start_date.desc()).limit(quarters).all()
+    
+    return [{
+        "cycle_name": r.cycle.name,
+        "total_score": r.total_score,
+        "grade": r.grade,
+        "original_grade": r.original_grade,
+        "dimensions": {
+            "performance": db.query(ScoreDetail).filter_by(record_id=r.id, dimension="performance", reviewer_type="manager").first().score,
+            "ability": db.query(ScoreDetail).filter_by(record_id=r.id, dimension="ability", reviewer_type="manager").first().score,
+            "attitude": db.query(ScoreDetail).filter_by(record_id=r.id, dimension="attitude", reviewer_type="manager").first().score,
+        }
+    } for r in records]
+
+
+def get_department_trend(department_id: int, quarters: int = 4, db: Session) -> list:
+    """
+    获取部门近 N 个季度的平均绩效趋势
+    """
+    cycles = db.query(AssessmentCycle).order_by(AssessmentCycle.start_date.desc()).limit(quarters).all()
+    
+    trend = []
+    for cycle in cycles:
+        avg_score = db.query(func.avg(AssessmentRecord.total_score)).filter(
+            AssessmentRecord.cycle_id == cycle.id,
+            AssessmentRecord.department_id == department_id,
+            AssessmentRecord.status.in_(["published", "archived"])
+        ).scalar()
+        
+        grade_distribution = db.query(AssessmentRecord.grade, func.count(AssessmentRecord.id)).filter(
+            AssessmentRecord.cycle_id == cycle.id,
+            AssessmentRecord.department_id == department_id,
+            AssessmentRecord.status.in_(["published", "archived"])
+        ).group_by(AssessmentRecord.grade).all()
+        
+        trend.append({
+            "cycle_name": cycle.name,
+            "avg_score": round(avg_score, 1) if avg_score else 0,
+            "grade_distribution": {grade: count for grade, count in grade_distribution}
+        })
+    
+    return trend
+```
+
+---
+
+### 5.9 员工导入校验算法
+
+Excel 批量导入时的字段级与关联级校验规则。
+
+```python
+def validate_employee_import(row: dict, db: Session) -> list:
+    """
+    校验单条员工导入数据，返回错误列表（空列表表示校验通过）
+    """
+    errors = []
+    
+    # 必填字段校验
+    required_fields = ["name", "employee_no", "department_id", "position_id", "manager_id", "email", "phone"]
+    for field in required_fields:
+        if not row.get(field):
+            errors.append(f"{field} 不能为空")
+    
+    # 工号唯一性校验
+    if row.get("employee_no"):
+        existing = db.query(Employee).filter_by(employee_no=row["employee_no"]).first()
+        if existing:
+            errors.append(f"工号 {row['employee_no']} 已存在")
+    
+    # 部门存在性校验
+    if row.get("department_id"):
+        dept = db.query(Department).get(row["department_id"])
+        if not dept:
+            errors.append(f"部门 ID {row['department_id']} 不存在")
+    
+    # 岗位存在性校验
+    if row.get("position_id"):
+        pos = db.query(Position).get(row["position_id"])
+        if not pos:
+            errors.append(f"岗位 ID {row['position_id']} 不存在")
+    
+    # 直属上级存在性校验 + 角色校验（必须是 manager）
+    if row.get("manager_id"):
+        manager = db.query(Employee).join(User).filter(
+            Employee.id == row["manager_id"],
+            User.role == "manager"
+        ).first()
+        if not manager:
+            errors.append(f"直属上级 ID {row['manager_id']} 不存在或不是 manager 角色")
+    
+    # 邮箱格式校验
+    if row.get("email"):
+        import re
+        if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", row["email"]):
+            errors.append(f"邮箱格式不正确: {row['email']}")
+    
+    # 手机号格式校验（中国大陆）
+    if row.get("phone"):
+        import re
+        if not re.match(r"^1[3-9]\d{9}$", row["phone"]):
+            errors.append(f"手机号格式不正确: {row['phone']}")
+    
+    # 入职日期格式校验
+    if row.get("hire_date"):
+        try:
+            datetime.strptime(row["hire_date"], "%Y-%m-%d")
+        except ValueError:
+            errors.append(f"入职日期格式不正确: {row['hire_date']}，应为 YYYY-MM-DD")
+    
+    return errors
+```
+
+---
+
+### 5.10 协作评分人分配校验算法
+
+上级为下属分配协作评分人时的业务规则校验。
+
+```python
+def validate_peer_assignment(employee_id: int, reviewer_ids: list, cycle_id: int, db: Session) -> list:
+    """
+    校验协作评分人分配是否合法，返回错误列表（空列表表示通过）
+    """
+    errors = []
+    
+    # 1. 数量上限：最多 3 人
+    if len(reviewer_ids) > 3:
+        errors.append("协作评分人最多分配 3 人")
+    
+    # 2. 不能重复
+    if len(reviewer_ids) != len(set(reviewer_ids)):
+        errors.append("协作评分人不能重复")
+    
+    # 3. 不能包含被评人本人
+    if employee_id in reviewer_ids:
+        errors.append("协作评分人不能包含被评人本人")
+    
+    # 4. 不能包含被评人的直属上级
+    employee = db.query(Employee).get(employee_id)
+    if employee and employee.manager_id in reviewer_ids:
+        errors.append("协作评分人不能包含被评人的直属上级")
+    
+    # 5. 协作评分人必须存在且在职
+    for reviewer_id in reviewer_ids:
+        reviewer = db.query(Employee).filter_by(id=reviewer_id, is_active=True).first()
+        if not reviewer:
+            errors.append(f"协作评分人 ID {reviewer_id} 不存在或已离职")
+            continue
+        
+        # 6. 协作评分人不能与被评人同部门（体现跨部门协作）
+        if reviewer.department_id == employee.department_id:
+            errors.append(f"协作评分人 {reviewer.name} 与被评人同部门，必须跨部门分配")
+        
+        # 7. 协作评分人已存在评分记录时不可移除（校验修改场景）
+        existing = db.query(PeerReviewer).filter_by(
+            cycle_id=cycle_id, employee_id=employee_id, reviewer_id=reviewer_id
+        ).first()
+        if existing and existing.status == "completed":
+            errors.append(f"协作评分人 {reviewer.name} 已完成评分，不可移除")
+    
+    return errors
+```
+
+---
+
+### 5.11 审批链路由算法
+
+根据考核记录自动确定审批链（Step 1 直属上级，Step 2 HR 负责人）。
+
+```python
+def get_approval_chain(record_id: int, db: Session) -> list:
+    """
+    获取考核记录的审批链
+    返回: [{"step_index": 1, "approver_id": ..., "role": "direct_manager"}, ...]
+    """
+    record = db.query(AssessmentRecord).get(record_id)
+    employee = db.query(Employee).get(record.employee_id)
+    
+    chain = []
+    
+    # Step 1: 直属上级（必须是 manager 角色）
+    if employee.manager_id:
+        manager_user = db.query(User).filter_by(employee_id=employee.manager_id, role="manager").first()
+        if manager_user:
+            chain.append({
+                "step_index": 1,
+                "approver_id": manager_user.id,
+                "approver_employee_id": employee.manager_id,
+                "role": "direct_manager",
+                "name": db.query(Employee).get(employee.manager_id).name
+            })
+    
+    # Step 2: HR 负责人（默认取第一个 hr 角色的用户，或从配置读取）
+    hr_user = db.query(User).filter(User.role.in_(["hr", "admin"])).order_by(User.id).first()
+    if hr_user:
+        chain.append({
+            "step_index": 2,
+            "approver_id": hr_user.id,
+            "approver_employee_id": hr_user.employee_id,
+            "role": "hr_head",
+            "name": db.query(Employee).get(hr_user.employee_id).name if hr_user.employee_id else "系统HR"
+        })
+    
+    return chain
+
+
+def reassign_approver(record_id: int, step_index: int, new_approver_id: int, reassigned_by: int, db: Session):
+    """
+    HR 重新指派审批人（如原审批人离职/休假）
+    """
+    record = db.query(AssessmentRecord).get(record_id)
+    
+    # 记录原审批人
+    old_approval = db.query(ApprovalRecord).filter_by(record_id=record_id, step_index=step_index).first()
+    old_approver_id = old_approval.approver_id if old_approval else None
+    
+    # 更新审批记录
+    if old_approval:
+        old_approval.approver_id = new_approver_id
+    else:
+        old_approval = ApprovalRecord(
+            record_id=record_id,
+            approver_id=new_approver_id,
+            step_index=step_index,
+            action=None
+        )
+        db.add(old_approval)
+    
+    db.commit()
+    
+    # 记录指派日志
+    return {
+        "record_id": record_id,
+        "step_index": step_index,
+        "old_approver_id": old_approver_id,
+        "new_approver_id": new_approver_id,
+        "reassigned_by": reassigned_by,
+        "reassigned_at": datetime.now().isoformat()
+    }
+```
+
+---
+
+### 5.12 申诉复核重算算法
+
+申诉复核修改结果后，更新总分、等级并通知相关方。
+
+```python
+def appeal_review_and_update(appeal_id: int, review_result: str, new_grade: str, review_comment: str, reviewer_id: int, db: Session):
+    """
+    申诉复核处理：维持原结果 或 修改结果
+    """
+    appeal = db.query(AppealRecord).get(appeal_id)
+    record = db.query(AssessmentRecord).get(appeal.record_id)
+    
+    if review_result == "maintain":
+        # 维持原结果
+        appeal.status = "rejected"
+        appeal.review_result = "维持原结果"
+        appeal.reviewer_id = reviewer_id
+        appeal.reviewed_at = datetime.now()
+        
+        # 通知申诉人
+        create_notification(appeal.employee_id, "appeal_rejected", f"您的申诉已被驳回，维持原结果。复核意见：{review_comment}")
+        
+    elif review_result == "modify":
+        # 修改结果：更新等级和分数
+        old_grade = record.grade
+        record.grade = new_grade
+        record.adjusted_level = new_grade
+        record.appeal_adjusted = True
+        record.appeal_adjusted_at = datetime.now()
+        record.appeal_adjusted_by = reviewer_id
+        
+        appeal.status = "resolved"
+        appeal.review_result = "修改结果"
+        appeal.reviewer_id = reviewer_id
+        appeal.reviewed_at = datetime.now()
+        
+        # 记录操作日志
+        log_operation(
+            user_id=reviewer_id,
+            action="appeal_grade_modified",
+            target_type="assessment_record",
+            target_id=record.id,
+            old_value={"grade": old_grade},
+            new_value={"grade": new_grade, "reason": review_comment}
+        )
+        
+        # 通知申诉人和直属上级
+        create_notification(appeal.employee_id, "appeal_approved", f"您的申诉已复核通过，等级由 {old_grade} 调整为 {new_grade}。复核意见：{review_comment}")
+        create_notification(record.manager_id, "appeal_approved_manager", f"您下属 {record.employee.name} 的申诉已复核通过，等级调整为 {new_grade}")
+    
+    db.commit()
+    return appeal
+```
+
+---
+
+### 5.13 通知生成规则
+
+系统通知的触发时机、接收人、内容模板对照表。
+
+| 触发场景 | 通知类型 | 接收人 | 内容模板 | 优先级 |
+|---------|---------|-------|---------|-------|
+| 考核周期启动 | `cycle_started` | 周期内所有员工 | 「{cycle_name} 已开始，请于 {deadline} 前完成自评」 | 高 |
+| 截止前 24h 提醒 | `deadline_reminder` | 未提交评分的员工 | 「{dimension} 评分即将截止，剩余时间不足 24 小时」 | 高 |
+| 截止前 4h 提醒 | `deadline_urgent` | 未提交评分的员工 | 「{dimension} 评分即将截止，请立即提交」 | 紧急 |
+| 评分逾期 | `overdue` | 未提交员工 + HR | 「{dimension} 评分已逾期，请联系 HR 处理」 | 高 |
+| 上级评分催促 | `nudge_manager` | 未评分下属的经理 | 「您有 {count} 名下属待评分，请点击处理」 | 中 |
+| 审批待处理 | `pending_approval` | Step 1/Step 2 审批人 | 「您有 {count} 条绩效记录待审批」 | 高 |
+| 审批通过 | `approved` | 被考核员工 | 「您的绩效记录已通过审批，进入面谈阶段」 | 中 |
+| 审批驳回 | `rejected` | 被考核员工 + 直属上级 | 「您的绩效记录被驳回，请修改后重新提交」 | 高 |
+| 结果发布 | `published` | 周期内所有员工 | 「{cycle_name} 结果已发布，请查看您的绩效结果」 | 中 |
+| 申诉提交 | `appeal_submitted` | HR | 「员工 {name} 提交了申诉，请尽快复核」 | 高 |
+| 申诉复核 | `appeal_reviewed` | 申诉员工 | 「您的申诉已复核，结果：{review_result}」 | 高 |
+| 强制分布降级 | `grade_adjusted` | 被降级员工 + 直属上级 | 「您的绩效等级由 {from_grade} 调整为 {to_grade}，原因：{reason}」 | 高 |
+| 面谈提醒 | `interview_scheduled` | 被面谈员工 | 「您的绩效面谈已预约，时间：{time}，地点：{location}」 | 中 |
+| 系统公告 | `announcement` | 全员 | 管理员/HR 手动发送的公告内容 | 低 |
+
+```python
+def create_notification(receiver_id: int, notification_type: str, content: str, related_record_id: int = None, db: Session = None):
+    """
+    创建系统通知
+    """
+    notification = Notification(
+        receiver_id=receiver_id,
+        type=notification_type,
+        content=content,
+        related_record_id=related_record_id,
+        is_read=False,
+        created_at=datetime.now()
+    )
+    db.add(notification)
+    db.commit()
+    return notification
+```
+
+---
+
+### 5.14 评分草稿合并算法
+
+草稿保存、加载、提交时的合并与锁定机制。
+
+```python
+def save_score_draft(record_id: int, reviewer_type: str, scores: dict, comment: str = None, db: Session = None):
+    """
+    保存评分草稿（自评/上级评/协作评）
+    scores: {"performance": 85, "ability": 90, "attitude": 88} 或 {"kpi_1": 85, "kpi_2": 90}
+    """
+    draft = db.query(ScoreDraft).filter_by(record_id=record_id, reviewer_type=reviewer_type).first()
+    if not draft:
+        draft = ScoreDraft(record_id=record_id, reviewer_type=reviewer_type)
+        db.add(draft)
+    
+    draft.scores = json.dumps(scores)
+    draft.comment = comment
+    draft.updated_at = datetime.now()
+    db.commit()
+    return draft
+
+
+def load_score_draft(record_id: int, reviewer_type: str, db: Session = None) -> dict:
+    """
+    加载评分草稿，返回合并后的评分数据
+    """
+    draft = db.query(ScoreDraft).filter_by(record_id=record_id, reviewer_type=reviewer_type).first()
+    if not draft:
+        return {"scores": {}, "comment": None}
+    
+    return {
+        "scores": json.loads(draft.scores) if draft.scores else {},
+        "comment": draft.comment,
+        "updated_at": draft.updated_at.isoformat() if draft.updated_at else None
+    }
+
+
+def submit_score(record_id: int, reviewer_type: str, scores: dict, comment: str = None, db: Session = None):
+    """
+    提交评分：将草稿转正为 score_details，并锁定该评分人的数据
+    """
+    # 1. 校验所有维度已填写
+    required_dimensions = ["performance", "ability", "attitude"]
+    for dim in required_dimensions:
+        if scores.get(dim) is None:
+            raise ValueError(f"维度 {dim} 未评分，无法提交")
+    
+    # 2. 写入 score_details（覆盖或新增）
+    for dimension, score in scores.items():
+        if dimension not in required_dimensions:
+            continue
+        detail = db.query(ScoreDetail).filter_by(record_id=record_id, dimension=dimension, reviewer_type=reviewer_type).first()
+        if not detail:
+            detail = ScoreDetail(record_id=record_id, dimension=dimension, reviewer_type=reviewer_type)
+            db.add(detail)
+        detail.score = score
+        detail.submitted_at = datetime.now()
+    
+    # 3. 写入评语（仅上级评）
+    if reviewer_type == "manager" and comment:
+        record = db.query(AssessmentRecord).get(record_id)
+        record.manager_comment = comment
+    
+    # 4. 删除草稿
+    draft = db.query(ScoreDraft).filter_by(record_id=record_id, reviewer_type=reviewer_type).first()
+    if draft:
+        db.delete(draft)
+    
+    # 5. 触发状态流转检查
+    check_status_transition(record_id, db)
+    
+    db.commit()
+    return {"success": True, "record_id": record_id}
+
+
+def check_status_transition(record_id: int, db: Session):
+    """
+    检查考核记录是否满足状态流转条件
+    """
+    record = db.query(AssessmentRecord).get(record_id)
+    cycle = db.query(AssessmentCycle).get(record.cycle_id)
+    
+    if record.status == "pending_self":
+        # 检查自评是否已提交（所有维度都有 score_details）
+        self_scores = db.query(ScoreDetail).filter_by(record_id=record_id, reviewer_type="self").count()
+        if self_scores >= 3:  # performance, ability, attitude
+            record.status = "pending_manager"
+            create_notification(record.manager_id, "pending_score", f"{record.employee.name} 已完成自评，请进行上级评分")
+    
+    elif record.status == "pending_manager":
+        manager_scores = db.query(ScoreDetail).filter_by(record_id=record_id, reviewer_type="manager").count()
+        if manager_scores >= 3:
+            if cycle.peer_review_enabled:
+                # 检查协作人是否已分配
+                peer_count = db.query(PeerReviewer).filter_by(record_id=record_id).count()
+                if peer_count > 0:
+                    record.status = "pending_peer"
+                else:
+                    # 未分配协作人，直接跳转 pending_summary
+                    record.status = "pending_summary"
+            else:
+                record.status = "pending_summary"
+    
+    elif record.status == "pending_peer":
+        # 检查所有协作人是否已提交
+        total_peers = db.query(PeerReviewer).filter_by(record_id=record_id).count()
+        completed_peers = db.query(PeerReviewer).filter_by(record_id=record_id, status="completed").count()
+        if total_peers > 0 and completed_peers >= total_peers:
+            record.status = "pending_summary"
+    
+    db.commit()
+```
+
+---
+
+### 5.15 PDF 档案生成算法
+
+PDF 档案的内容组织、分页与生成逻辑。
+
+```python
+def generate_performance_pdf(record_id: int, db: Session) -> str:
+    """
+    生成员工绩效考核 PDF 档案
+    返回: 生成的 PDF 文件路径
+    """
+    record = db.query(AssessmentRecord).get(record_id)
+    employee = db.query(Employee).get(record.employee_id)
+    cycle = db.query(AssessmentCycle).get(record.cycle_id)
+    
+    # 构建 PDF 内容数据
+    pdf_data = {
+        "title": "绩效考核档案",
+        "confidential": "机密",
+        "archive_no": f"PA-{cycle.id}-{employee.employee_no}-{record.id}",
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        
+        "employee": {
+            "name": employee.name,
+            "employee_no": employee.employee_no,
+            "department": employee.department.name,
+            "position": employee.position.name,
+            "manager": employee.manager.name if employee.manager else None
+        },
+        
+        "cycle": {
+            "name": cycle.name,
+            "start_date": cycle.start_date,
+            "end_date": cycle.end_date
+        },
+        
+        "scores": {
+            "total_score": record.total_score,
+            "grade": record.grade,
+            "original_grade": record.original_grade,
+            "dimensions": {}
+        }
+    }
+    
+    # 各维度得分明细
+    for dim in ["performance", "ability", "attitude"]:
+        details = db.query(ScoreDetail).filter_by(record_id=record_id, dimension=dim).all()
+        pdf_data["scores"]["dimensions"][dim] = {
+            "self": next((d.score for d in details if d.reviewer_type == "self"), None),
+            "manager": next((d.score for d in details if d.reviewer_type == "manager"), None),
+            "peer": next((d.score for d in details if d.reviewer_type == "peer"), None)
+        }
+    
+    # KPI 逐项评分
+    kpi_scores = db.query(KpiSnapshot).filter_by(record_id=record_id).all()
+    pdf_data["kpi_scores"] = [{
+        "name": k.kpi_name,
+        "weight": k.weight,
+        "target": k.target_value,
+        "self_score": k.self_score,
+        "manager_score": k.manager_score
+    } for k in kpi_scores]
+    
+    # 评语与面谈记录
+    pdf_data["manager_comment"] = record.manager_comment
+    interview = db.query(InterviewRecord).filter_by(record_id=record_id).first()
+    if interview:
+        pdf_data["interview"] = {
+            "date": interview.interview_date,
+            "location": interview.location,
+            "content": interview.content,
+            "improvement_plan": interview.improvement_plan
+        }
+    
+    # 申诉记录
+    appeal = db.query(AppealRecord).filter_by(record_id=record_id).first()
+    if appeal:
+        pdf_data["appeal"] = {
+            "reason": appeal.reason,
+            "detail": appeal.detail,
+            "status": appeal.status,
+            "review_result": appeal.review_result
+        }
+    
+    # 生成 PDF（使用 pdf_generator 工具）
+    from utils.pdf_generator import generate_pdf
+    file_path = generate_pdf(template="performance_archive.html", data=pdf_data, 
+                             output_dir="uploads/archives/",
+                             filename=f"{archive_no}.pdf")
+    
+    return file_path
+```
+
+**PDF 档案内容结构**：
+1. **封面**：档案编号、员工姓名、考核周期、生成时间、「机密」水印
+2. **基本信息**：姓名、工号、部门、岗位、直属上级
+3. **三维度得分明细**：自评/上级评/协作评对比表格
+4. **KPI 逐项评分**：指标名称、权重、目标值、自评分、上级评分
+5. **加权计算过程**：维度权重 × 评分人权重 = 维度得分，维度得分 × 维度权重 = 总分
+6. **最终等级**：总分、等级、强制调整记录（如有）
+7. **经理评语**：综合评语全文
+8. **绩效面谈记录**：面谈时间、地点、沟通内容、改进计划（C/D 等级必填）
+9. **申诉记录**：如有申诉，展示申诉理由、复核结果、复核意见
+10. **页眉**：「机密—绩效考核档案」
+11. **页脚**：生成时间、档案编号、页码
 
 
 ---
@@ -1038,145 +2197,680 @@ def _get_next_lower_grade(grade):
 
 | 功能 | admin (01) | hr (02) | manager (03) | employee (04) | peer (05) | executive (06) |
 |------|:----------:|:-------:|:------------:|:-------------:|:---------:|:--------------:|
-| 系统配置 (权重/等级规则) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| 员工管理 | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| 发起考核 | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 系统配置 (权重/等级规则/KPI模板) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| 员工管理 (增删改查/导入) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 部门与岗位管理 | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 发起考核/创建周期 | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 查看考核周期列表 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 查看全公司汇总 | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
 | 查看部门汇总 | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
 | 查看下属绩效 | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| 查看本人绩效 | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| 查看本人绩效 | ✅ | ✅ | ✅ | ✅ | ⚠️ | ❌ |
 | 自评 | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | 上级评分 | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | 协作评分 | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| 审批 | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| 审批 (Step 1/2) | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | 申诉 | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | 申诉复核 | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| 导出报表 | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 强制分布处理 | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 绩效面谈 | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| 催促/提醒下属 | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| 重新指派审批人 | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 发布考核结果 | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 归档考核周期 | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 导出报表/PDF | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 查看操作日志 | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| 查看通知消息 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 修改密码 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 高管仪表盘查看 | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
+> **说明**：
+> - `⚠️` peer 角色若同时关联 employee 身份（同一人），可查看本人绩效；纯 peer 账号不可查看。
+> - manager 的「查看本人绩效」取决于其是否同时有 employee 身份；系统支持一人多角色。
+
 ### 6.2 数据隔离规则
-- 员工只能查看 `employee_id` 等于本人的记录。
-- 上级只能查看 `manager_id` 链下所管辖的员工的记录。
-- 部门负责人可查看本部门及子部门的所有记录。
-- HR 和 admin 可查看全部记录。
+
+系统采用**多层级数据隔离**策略，确保用户只能访问其权限范围内的数据。
+
+#### 6.2.1 基础数据隔离
+
+| 数据类型 | 隔离规则 | 说明 |
+|---------|---------|------|
+| **员工个人信息** | 员工只能查看 `employee_id` 等于本人的记录 | 员工列表对 admin/hr 开放，其他角色仅查看本人 |
+| **考核记录** | 员工只能查看本人的考核记录；manager 只能查看下属的考核记录；HR/admin 可查看全部 | 通过 `assessment_records.employee_id` 和 `employees.manager_id` 链控制 |
+| **部门数据** | 部门负责人可查看本部门及子部门的所有记录 | 基于 `departments` 表的父子关系树遍历 |
+| **全公司汇总** | 仅 admin/hr/executive 可查看 | 聚合统计不涉及个人敏感信息 |
+| **高管仪表盘** | executive 仅查看聚合数据，不可下钻到个人明细 | 前端页面限制，后端接口同时校验 |
+
+#### 6.2.2 评分数据隔离
+
+| 数据类型 | 隔离规则 | 说明 |
+|---------|---------|------|
+| **自评数据** | 员工只能填写和查看本人的自评；manager 可查看下属的自评作为参考 | 自评提交前仅本人可见，提交后上级可见 |
+| **上级评分** | manager 只能为下属评分；员工在结果发布前不可查看上级评分 | 评分阶段结束后（pending_summary）HR 可查看 |
+| **协作评分** | peer 只能对分配给自己的协作评分任务进行评分；只能查看「工作能力」维度 | 协作评分人不可查看被评人的其他维度或历史绩效 |
+| **评分草稿** | 仅评分人本人可查看和修改自己的草稿 | 草稿数据与正式提交数据隔离存储 |
+
+#### 6.2.3 审批与申诉数据隔离
+
+| 数据类型 | 隔离规则 | 说明 |
+|---------|---------|------|
+| **审批数据** | Step 1 审批人只能看到待自己审批的记录；Step 2 审批人只能看到已通过 Step 1 的记录 | 通过 `approval_records.approver_id` 和 `step_index` 双重过滤 |
+| **申诉数据** | 员工只能查看本人的申诉；HR 可查看全部申诉 | 申诉详情包含敏感评分数据，需严格隔离 |
+| **面谈记录** | manager 只能查看自己和下属的面谈记录；员工只能查看本人的面谈记录 | 面谈内容涉及敏感沟通，禁止跨部门查看 |
+| **操作日志** | 仅 admin/hr 可查看；普通员工无权访问 | 日志包含系统级操作，属于管理员权限 |
+
+#### 6.2.4 考核周期级别隔离
+
+| 数据类型 | 隔离规则 | 说明 |
+|---------|---------|------|
+| **周期配置** | 考核周期创建后，配置数据（维度权重、评分人权重、等级规则）与全局配置解耦 | 即使全局配置后续修改，已创建的考核周期仍保持原配置快照 |
+| **周期参与人员** | 仅纳入 `cycle_employees` 的员工可参与该周期考核；中途添加的人员自动继承当前周期配置 | 未纳入周期的人员不可查看该周期任何数据 |
+| **周期归档数据** | 归档后所有数据标记 `is_locked = True`，仅 admin 可解冻查看，任何修改接口均拒绝 | 归档数据仅支持查看和导出，不可评分、审批、申诉 |
 
 ### 6.3 数据安全
-- 密码使用 **bcrypt** 哈希存储，永不存明文。
-- 已归档考核周期数据标记为 `is_locked = True`，仅 admin 可解冻修改。
-- 所有敏感操作（审批通过/驳回、结果修改）写入操作日志表。
+
+#### 6.3.1 密码与认证安全
+
+| 安全项 | 策略 | 说明 |
+|--------|------|------|
+| **密码存储** | **bcrypt** 哈希（salt + 10 rounds），永不存明文 | 即使数据库泄露，密码也无法逆向破解 |
+| **密码复杂度** | 最少 8 位，必须包含字母 + 数字 | 前端实时校验，后端二次校验 |
+| **密码历史** | 禁止复用最近 3 次历史密码 | 更换密码时校验 `password_history` 表 |
+| **登录失败锁定** | 连续 5 次登录失败锁定账号 15 分钟 | 锁定期间禁止登录，可联系 admin 解锁 |
+| **会话管理** | JWT Access Token 有效期 2 小时，Refresh Token 有效期 7 天 | 支持「记住我」延长会话；Token 过期前 15 分钟自动刷新 |
+| **多设备登录** | 同一账号最多 3 个设备同时在线 | 超过时最早登录的会话被踢出 |
+| **默认密码** | 首次登录强制修改默认密码（工号 + `@123`） | `is_default_password` 标记为 true 时，所有 API 返回 403 并要求修改密码 |
+
+#### 6.3.2 数据访问安全
+
+| 安全项 | 策略 | 说明 |
+|--------|------|------|
+| **归档锁定** | 已归档考核周期 `is_locked = True`，任何修改接口均拒绝 | 仅 admin 可通过特殊接口解冻（需记录解冻日志） |
+| **敏感字段脱敏** | 手机号、邮箱、身份证号等字段按角色脱敏展示 | 详见 **6.6 敏感数据脱敏** |
+| **操作日志** | 所有敏感操作（审批/驳回/修改/删除）写入 `operation_logs` | 包含操作人、IP、前后值快照，不可删除 |
+| **数据导出审计** | 所有 Excel/PDF 导出记录到 `operation_logs` | 包含导出时间、导出人、数据范围、文件大小 |
+| **接口防重放** | 关键接口（评分提交、审批通过）携带 `timestamp` + `nonce`，有效期 5 分钟 | 防止重放攻击导致重复提交 |
+
+#### 6.3.3 文件与输入安全
+
+| 安全项 | 策略 | 说明 |
+|--------|------|------|
+| **Excel 导入安全** | 限制文件类型（仅 `.xlsx`）、大小（≤ 5MB）、行数（≤ 1000 行） | 后端使用 `openpyxl` 解析，禁止执行宏 |
+| **文件上传路径** | 所有上传文件存储在 `uploads/` 目录，文件名使用 UUID 重命名，禁止原文件名 | 防止路径遍历和文件名攻击 |
+| **PDF 档案访问** | 通过后端接口流式下载，前端不可直接访问 `uploads/` 目录 | 每次下载校验用户权限和 `record_id` 归属 |
+| **SQL 注入防护** | 全系统使用 SQLAlchemy ORM，禁止原生 SQL 拼接 | 参数化查询天然防护 SQL 注入 |
+| **XSS 防护** | 前端 Vue 3 模板自动转义；后端接口校验输入长度和特殊字符 | 富文本输入（面谈记录）使用 `bleach` 库过滤危险标签 |
+| **CSRF 防护** | 前后端分离 + JWT 认证，天然免疫 CSRF | 额外在 Cookie 中设置 `SameSite=Strict` |
+
+#### 6.3.4 数据备份与灾难恢复
+
+| 安全项 | 策略 | 说明 |
+|--------|------|------|
+| **自动备份** | 每日凌晨 2 点自动备份 SQLite 数据库文件到 `backups/` 目录 | 保留最近 30 天备份，按 `YYYY-MM-DD` 命名 |
+| **手动备份** | admin 可在系统配置页面触发「立即备份」 | 备份文件提供下载链接，下载后自动删除服务端副本 |
+| **备份恢复** | 仅 admin 可执行恢复，恢复前自动创建当前数据库快照 | 恢复操作写入 `operation_logs`，防止误操作 |
+| **归档数据导出** | 已归档周期的 PDF 档案和 Excel 报表自动复制到 `archives/` 目录 | 即使主数据库损坏，归档数据仍可独立恢复 |
+
+---
+
+### 6.4 接口安全设计（JWT 实现）
+
+```python
+# FastAPI JWT 依赖注入示例
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import jwt
+from datetime import datetime, timedelta
+
+security = HTTPBearer()
+
+# JWT 配置
+JWT_SECRET = "your-secret-key"  # 生产环境从环境变量读取
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 120  # 2 小时
+REFRESH_TOKEN_EXPIRE_DAYS = 7
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire, "type": "access"})
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def create_refresh_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    to_encode.update({"exp": expire, "type": "refresh"})
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """
+    JWT 鉴权依赖：校验 Token 有效性、提取用户信息、检查是否过期
+    """
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="无效的认证凭证")
+        
+        # 检查 Token 类型
+        if payload.get("type") != "access":
+            raise HTTPException(status_code=401, detail="请使用 Access Token")
+        
+        # 检查用户是否被禁用
+        user = db.query(User).get(user_id)
+        if not user or not user.is_active:
+            raise HTTPException(status_code=403, detail="账号已被禁用")
+        
+        return user
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="认证已过期，请重新登录")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="无效的认证凭证")
+
+# 权限守卫装饰器
+def require_roles(allowed_roles: list):
+    def role_checker(current_user: User = Depends(get_current_user)):
+        if current_user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"当前角色 {current_user.role} 无权执行此操作"
+            )
+        return current_user
+    return role_checker
+
+# 使用示例
+@app.post("/cycles/{id}/launch")
+async def launch_cycle(
+    cycle_id: int,
+    current_user: User = Depends(require_roles(["admin", "hr"]))
+):
+    """仅 admin/hr 可发起考核"""
+    pass
+```
+
+---
+
+### 6.5 前端路由守卫（Vue Router）
+
+```javascript
+// router/index.js
+import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    { path: '/login', name: 'Login', component: LoginView },
+    { path: '/dashboard', name: 'Dashboard', component: DashboardView, meta: { requiresAuth: true } },
+    { path: '/config', name: 'Config', component: ConfigView, meta: { requiresAuth: true, roles: ['admin'] } },
+    { path: '/cycles', name: 'Cycles', component: CycleListView, meta: { requiresAuth: true, roles: ['admin', 'hr'] } },
+    { path: '/score-sheet/:recordId', name: 'ScoreSheet', component: ScoreSheetView, meta: { requiresAuth: true } },
+    { path: '/summary/:cycleId', name: 'Summary', component: SummaryView, meta: { requiresAuth: true, roles: ['admin', 'hr', 'manager'] } },
+    { path: '/approval-workbench', name: 'ApprovalWorkbench', component: ApprovalWorkbenchView, meta: { requiresAuth: true, roles: ['manager', 'hr'] } },
+    { path: '/my-performance', name: 'MyPerformance', component: MyPerformanceView, meta: { requiresAuth: true, roles: ['employee', 'manager'] } },
+    { path: '/interview/:recordId', name: 'Interview', component: InterviewView, meta: { requiresAuth: true, roles: ['manager'] } },
+    { path: '/appeals', name: 'Appeals', component: AppealListView, meta: { requiresAuth: true, roles: ['hr'] } },
+    { path: '/reports', name: 'Reports', component: ReportView, meta: { requiresAuth: true, roles: ['admin', 'hr', 'executive'] } },
+    { path: '/employees', name: 'Employees', component: EmployeeListView, meta: { requiresAuth: true, roles: ['admin', 'hr'] } },
+    { path: '/peer-review', name: 'PeerReview', component: PeerReviewView, meta: { requiresAuth: true, roles: ['peer'] } },
+    { path: '/distribution-review/:cycleId', name: 'DistributionReview', component: DistributionReviewView, meta: { requiresAuth: true, roles: ['admin', 'hr'] } },
+    { path: '/logs', name: 'Logs', component: AuditLogView, meta: { requiresAuth: true, roles: ['admin', 'hr'] } },
+  ]
+})
+
+// 全局路由守卫
+router.beforeEach(async (to, from, next) => {
+  const authStore = useAuthStore()
+  
+  // 1. 检查是否需要登录
+  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+    return next('/login')
+  }
+  
+  // 2. 检查角色权限
+  if (to.meta.roles && !to.meta.roles.includes(authStore.userRole)) {
+    // 无权限时重定向到 403 页面或仪表盘
+    return next('/dashboard')
+  }
+  
+  // 3. 检查默认密码
+  if (authStore.isDefaultPassword && to.path !== '/change-password') {
+    return next('/change-password')
+  }
+  
+  // 4. 检查页面级操作权限（如自评页面只能访问自己的记录）
+  if (to.params.recordId) {
+    const hasAccess = await authStore.checkRecordAccess(to.params.recordId)
+    if (!hasAccess) {
+      return next('/dashboard')
+    }
+  }
+  
+  next()
+})
+
+export default router
+```
+
+---
+
+### 6.6 敏感数据脱敏
+
+| 敏感字段 | 员工视角 | 直属上级视角 | HR/admin 视角 | executive 视角 | 说明 |
+|---------|---------|------------|-------------|--------------|------|
+| **手机号** | `153****3992` | `153****3992` | `15353639092` | `153****3992` | 中间 4 位隐藏 |
+| **邮箱** | `zh****@example.com` | `zh****@example.com` | `zhangsan@example.com` | `zh****@example.com` | 用户名部分隐藏 |
+| **身份证号** | `************1234` | `************1234` | `110101199001011234` | `************1234` | 仅显示后 4 位 |
+| **家庭住址** | `北京市****` | `北京市****` | `北京市朝阳区xxx街道` | `北京市****` | 仅显示省市 |
+| **银行卡号** | `**** **** **** 1234` | `**** **** **** 1234` | `6222 0222 1234 5678` | `**** **** **** 1234` | 仅显示后 4 位 |
+| **绩效总分** | `85.5` | `85.5` | `85.5` | `85.5` | 全员可见，不脱敏 |
+| **他人绩效明细** | ❌ 不可见 | ✅ 下属可见 | ✅ 全部可见 | ⚠️ 仅汇总统计 | 员工不可查看同事的评分明细 |
+
+```python
+def mask_phone(phone: str) -> str:
+    """手机号脱敏：15353639092 → 153****3992"""
+    if not phone or len(phone) != 11:
+        return phone
+    return phone[:3] + "****" + phone[-4:]
+
+def mask_email(email: str) -> str:
+    """邮箱脱敏：zhangsan@example.com → zh****@example.com"""
+    if not email or "@" not in email:
+        return email
+    local, domain = email.split("@")
+    if len(local) <= 2:
+        return "**@" + domain
+    return local[:2] + "****@" + domain
+
+def mask_id_card(id_card: str) -> str:
+    """身份证脱敏：110101199001011234 → ************1234"""
+    if not id_card or len(id_card) != 18:
+        return id_card
+    return "************" + id_card[-4:]
+```
+
+---
+
+### 6.7 审计日志策略
+
+| 策略项 | 规则 | 说明 |
+|--------|------|------|
+| **日志保留期限** | 操作日志保留 3 年，超过后自动归档到 `archives/logs/` 目录 | 归档日志压缩为 `.zip`，保留 7 年 |
+| **日志不可删除** | 任何角色（包括 admin）不可删除或修改 `operation_logs` 表数据 | 数据库层面禁止 DELETE/UPDATE，仅允许 INSERT/SELECT |
+| **敏感操作定义** | 审批通过/驳回、结果修改、等级调整、申诉复核、强制分布确认、数据导出、归档解冻、密码重置 | 上述操作必须记录完整前后值快照 |
+| **日志查询权限** | admin 可查看全部日志；HR 可查看自己及下属相关日志；普通员工不可查看 | 接口层按 `user_id` 或 `target_id` 关联过滤 |
+| **异常检测** | 系统每日扫描日志，检测异常模式：同一用户 1 分钟内 10 次审批操作、非工作时间大量导出 | 触发异常时向 admin 发送预警通知 |
+
+---
+
+### 6.8 异常处理与安全防护
+
+| 威胁类型 | 防护措施 | 实现位置 |
+|---------|---------|---------|
+| **SQL 注入** | 全系统使用 SQLAlchemy ORM + 参数化查询，禁止字符串拼接 SQL | 数据库访问层（Repository） |
+| **XSS 攻击** | 前端 Vue 模板自动转义；后端富文本使用 `bleach` 过滤；输入校验特殊字符 | 前端渲染层 + 后端输入校验 |
+| **CSRF 攻击** | 前后端分离 + JWT Bearer 认证；Cookie 设置 `SameSite=Strict` | 认证中间件 + 前端配置 |
+| **暴力破解** | 登录失败 5 次锁定 15 分钟；接口限流（Rate Limiting）：同一 IP 每分钟最多 60 次请求 | `auth.py` + 中间件 |
+| **重放攻击** | 关键接口（评分提交、审批）要求携带 `timestamp` + `nonce`，有效期 5 分钟 | 业务接口装饰器 |
+| **文件上传漏洞** | 限制文件类型、大小、重命名 UUID；禁止解析宏；上传目录不可执行 | `excel_import.py` + Nginx 配置 |
+| **信息泄露** | 错误返回统一为 `{"code": 500, "message": "系统错误"}`，不暴露堆栈、SQL、路径 | 全局异常处理器 |
+| **会话劫持** | JWT 绑定 IP 段（可选）；异常地理位置登录触发二次验证（MVP 可选） | 认证中间件 |
+
+---
+
+### 6.9 密码重置与账号安全
+
+| 功能 | 流程 | 安全控制 |
+|------|------|---------|
+| **密码重置** | admin/HR 在员工管理页面重置 → 系统生成随机密码 → 通过站内通知发送给员工 | 重置操作记录日志，通知员工立即修改 |
+| **账号锁定** | 连续 5 次登录失败自动锁定 → 员工联系 HR → HR 解锁或等待 15 分钟自动解锁 | 解锁操作记录日志 |
+| **员工离职** | HR 标记 `is_active = false` → 账号立即禁用，所有待办任务转交直属上级 | 禁用操作记录日志，通知相关审批人 |
+| **角色变更** | admin 修改用户角色 → 立即生效，已登录用户下次请求时权限刷新 | 变更操作记录日志，通知本人 |
 
 ---
 
 ## 7. 项目目录结构
 
+> 以下目录结构基于 **4 层后端架构**（Router → Service → Repository → Infrastructure）和 Vue 3 前端工程化最佳实践设计，与第 2 章系统架构、第 4 章接口清单、第 5 章核心算法、第 6 章安全设计完全对应。
+
 ```
 performance_evaluation_system/
-├── docs/                           # 设计文档
-│   ├── PRD_绩效考核评分系统_v1.0.md    # PRD (已定稿)
-│   └── TECH_绩效考核评分系统_v1.0.md   # 本技术方案文档
-├── backend/                        # FastAPI 后端
+├── PRD_绩效考核评分系统_v1.0.md       # 产品需求文档（根级，与 TECH 同级）
+├── TECH_绩效考核评分系统_v1.0.md      # 技术方案文档（本文件）
+├── README.md                           # 项目启动、环境配置、部署说明
+├── requirements.md                     # 系统依赖（Python/Node 版本）
+│
+├── backend/                            # FastAPI 后端（4 层架构）
 │   ├── app/
 │   │   ├── __init__.py
-│   │   ├── main.py                 # 应用入口
-│   │   ├── database.py             # SQLAlchemy 配置
-│   │   ├── models.py               # 数据模型
-│   │   ├── schemas.py              # Pydantic 请求/响应模型
-│   │   ├── auth.py                 # JWT 认证与密码工具
-│   │   ├── dependencies.py         # 依赖注入 (权限校验)
-│   │   ├── routers/                # 路由模块
+│   │   ├── main.py                     # 应用入口：注册路由、中间件、生命周期事件
+│   │   │
+│   │   ├── core/                       # 核心基础设施（跨层共享）
 │   │   │   ├── __init__.py
-│   │   │   ├── auth.py             # 登录认证
-│   │   │   ├── employees.py        # 员工管理
-│   │   │   ├── departments.py      # 部门与岗位管理
-│   │   │   ├── cycles.py           # 考核周期
-│   │   │   ├── scores.py           # 评分管理
-│   │   │   ├── approvals.py        # 审批流程
-│   │   │   ├── appeals.py          # 申诉管理
-│   │   │   ├── interviews.py       # 绩效面谈
-│   │   │   ├── peers.py            # 协作评分
-│   │   │   ├── reports.py          # 报表分析
-│   │   │   ├── kpi_templates.py    # KPI模板
-│   │   │   ├── config.py           # 系统配置
-│   │   │   ├── dashboard.py        # 仪表盘
-│   │   │   └── logs.py             # 操作日志
-│   │   ├── services/               # 业务逻辑层
+│   │   │   ├── config.py             # 环境配置：数据库URL、JWT密钥、超参、开关
+│   │   │   ├── exceptions.py         # 自定义异常：BizError、AuthError、ValidationError
+│   │   │   ├── middleware.py         # 中间件：CORS、请求日志、错误拦截、耗时统计
+│   │   │   ├── scheduler.py          # APScheduler 初始化：截止提醒、逾期标记、归档清理
+│   │   │   ├── security.py           # JWT 编解码、密码哈希（bcrypt）、Token 刷新
+│   │   │   └── events.py             # 生命周期：启动/关闭事件（数据库连接、调度器启动）
+│   │   │
+│   │   ├── routers/                    # 第 1 层：API 路由（与第 4 章接口 1:1 对应）
 │   │   │   ├── __init__.py
-│   │   │   ├── score_calculator.py # 加权计算算法
-│   │   │   ├── grade_mapper.py     # 等级映射算法
-│   │   │   ├── distribution_enforcer.py  # 强制分布校验与调整算法
-│   │   │   └── anomaly_detector.py # 异常检测算法
-│   │   └── utils/                  # 工具函数
+│   │   │   ├── auth.py               # 登录 / 登出 / Token 刷新 / 密码修改
+│   │   │   ├── users.py              # 当前用户：GET /users/me、修改密码
+│   │   │   ├── employees.py          # 员工 CRUD / 导入 / 导出 / 直属下属
+│   │   │   ├── departments.py        # 部门 / 岗位 / 部门负责人
+│   │   │   ├── cycles.py             # 考核周期 / 发布 / 归档 / 批量催办 / 部门配置
+│   │   │   ├── scores.py             # 评分提交 / 草稿 / 加权计算 / 分布推荐 / 分布确认
+│   │   │   ├── approvals.py          # 审批链 / 审批提交 / 审批历史
+│   │   │   ├── appeals.py            # 申诉提交 / 复核 / 重算
+│   │   │   ├── interviews.py         # 面谈记录 / 确认
+│   │   │   ├── peers.py              # 协作评分人 / 待评列表 / 评分提交
+│   │   │   ├── reports.py            # 报表 / 分布图 / 趋势图 / 导出
+│   │   │   ├── kpi_templates.py      # KPI 模板 / 岗位关联
+│   │   │   ├── config.py             # 系统配置：等级规则 / 权重 / 小部门豁免 / 协作开关
+│   │   │   ├── dashboard.py          # 仪表盘统计 / 待办聚合
+│   │   │   ├── logs.py               # 操作日志查询 / 审计
+│   │   │   ├── notifications.py      # 通知列表 / 已读 / 一键已读
+│   │   │   └── archive.py            # 归档锁定 / PDF 下载 / 历史档案
+│   │   │
+│   │   ├── services/                   # 第 2 层：业务逻辑（与第 5 章算法对应）
+│   │   │   ├── __init__.py
+│   │   │   ├── score_calculator.py     # 5.1 加权计算 + 5.7 仪表盘统计
+│   │   │   ├── grade_mapper.py         # 5.2 等级映射 + 5.8 历史趋势
+│   │   │   ├── distribution_enforcer.py # 5.3 分布校验 + 5.5 强制分布执行
+│   │   │   ├── anomaly_detector.py     # 5.3 异常检测（分差 / 空评）
+│   │   │   ├── kpi_aggregator.py       # 5.6 KPI 聚合（按维度 / 按指标）
+│   │   │   ├── workflow_state_machine.py # 5.4 状态机（10 状态流转）
+│   │   │   ├── approval_chain_router.py # 5.11 审批链路由
+│   │   │   ├── appeal_recalculator.py   # 5.12 申诉重算
+│   │   │   ├── score_draft_merger.py    # 5.14 分数草稿合并
+│   │   │   ├── employee_import_validator.py # 5.9 员工导入校验
+│   │   │   ├── peer_assignment_validator.py # 5.10 协作人分配校验
+│   │   │   ├── notification_rule_engine.py # 5.13 通知规则引擎
+│   │   │   ├── pdf_archive_generator.py   # 5.15 PDF 归档生成
+│   │   │   └── report_builder.py          # 报表构建（分布 / 趋势 / 汇总）
+│   │   │
+│   │   ├── repositories/               # 第 3 层：数据访问（Repository 模式）
+│   │   │   ├── __init__.py
+│   │   │   ├── base.py               # 通用 CRUD：BaseRepository（create/get/list/update/delete）
+│   │   │   ├── employee_repo.py      # 员工 / 直属下级查询
+│   │   │   ├── department_repo.py    # 部门 / 岗位 / 负责人
+│   │   │   ├── cycle_repo.py         # 周期 / 周期人员 / 周期部门
+│   │   │   ├── record_repo.py        # 考核记录 / 状态筛选
+│   │   │   ├── score_repo.py         # 评分明细 / 草稿 / 聚合
+│   │   │   ├── approval_repo.py      # 审批记录 / 待办 / 历史
+│   │   │   ├── appeal_repo.py        # 申诉 / 复核
+│   │   │   ├── interview_repo.py     # 面谈记录
+│   │   │   ├── peer_repo.py          # 协作人 / 待评
+│   │   │   ├── config_repo.py        # 系统配置 / 等级规则
+│   │   │   ├── notification_repo.py  # 通知 / 已读状态
+│   │   │   └── log_repo.py           # 操作日志
+│   │   │
+│   │   ├── infrastructure/             # 第 4 层：基础设施
+│   │   │   ├── __init__.py
+│   │   │   ├── database.py           # SQLAlchemy Engine / Session / 连接池（原 app/database.py 迁入）
+│   │   │   ├── file_storage.py       # 本地文件上传 / 下载 / 路径管理
+│   │   │   ├── pdf_engine.py         # PDF 渲染引擎（Playwright / WeasyPrint 封装）
+│   │   │   ├── notification_sender.py # 站内信发送（数据库写入）+ 邮件发送（可选扩展）
+│   │   │   ├── excel_parser.py       # Excel 读取 / 模板解析
+│   │   │   └── scheduler_jobs.py     # 定时任务具体 Job：deadline_reminder、overdue_marker、auto_archive
+│   │   │
+│   │   └── utils/                      # 工具函数（无状态、纯函数）
 │   │       ├── __init__.py
-│   │       ├── excel_import.py     # Excel导入
-│   │       ├── pdf_generator.py    # PDF档案生成
-│   │       └── export_excel.py     # Excel导出
-│   ├── alembic/                    # 数据库迁移
-│   ├── requirements.txt            # Python依赖
-│   └── config.py                   # 配置文件
-├── tests/                          # 系统级测试目录（根级）
-│   ├── design/                     # 测试设计文档
-│   ├── cases/                      # 测试用例（Markdown / Excel）
-│   ├── scripts/
-│   │   ├── backend/                # pytest 后端单元/集成测试
-│   │   ├── frontend/               # Vitest 前端组件测试
-│   │   └── e2e/                    # Playwright 端到端系统测试
-│   └── debug/                      # 问题定位与调试脚本
-├── frontend/                       # Vue 3 前端
+│   │       ├── data_masking.py       # 6.6 数据脱敏（手机 / 邮箱 / 身份证）
+│   │       ├── audit_logger.py       # 6.7 审计日志记录（写入 operation_logs 表）
+│   │       ├── password_utils.py     # 6.9 密码强度校验 / 默认密码检测
+│   │       ├── validators.py         # 通用校验：手机号 / 邮箱 / 工号 / 日期
+│   │       ├── formatters.py         # 格式化：分数 / 百分比 / 日期
+│   │       ├── excel_import.py       # Excel 导入预览 + 校验 + 错误报告
+│   │       ├── excel_export.py       # Excel 导出（报表 / 模板）
+│   │       └── pdf_generator.py      # PDF 单页生成（如绩效通知单）
+│   │
+│   ├── alembic/                        # 数据库迁移脚本
+│   │   ├── versions/                 # 版本文件
+│   │   └── env.py
+│   ├── tests/                          # 后端单元/集成测试（pytest）
+│   │   ├── __init__.py
+│   │   ├── conftest.py               # 共享 Fixture：TestClient、内存数据库、认证 Token
+│   │   ├── test_auth.py
+│   │   ├── test_users.py
+│   │   ├── test_employees.py
+│   │   ├── test_departments.py
+│   │   ├── test_cycles.py
+│   │   ├── test_scores.py
+│   │   ├── test_approvals.py
+│   │   ├── test_appeals.py
+│   │   ├── test_interviews.py
+│   │   ├── test_peers.py
+│   │   ├── test_reports.py
+│   │   ├── test_kpi_templates.py
+│   │   ├── test_config.py
+│   │   ├── test_dashboard.py
+│   │   ├── test_notifications.py
+│   │   ├── test_archive.py
+│   │   ├── test_logs.py
+│   │   └── test_distribution.py
+│   ├── requirements.txt                # Python 依赖
+│   └── run_tests.bat                 # Windows 一键测试脚本
+│
+├── frontend/                           # Vue 3 前端（工程化）
 │   ├── public/
-│   ├── src/
-│   │   ├── api/                    # Axios 请求封装
-│   │   ├── assets/
-│   │   ├── components/             # 公共组件
-│   │   ├── router/                 # 路由配置
-│   │   ├── stores/                 # Pinia 状态管理
-│   │   ├── views/                  # 页面视图
-│   │   │   ├── login/              # 登录页
-│   │   │   ├── dashboard/          # 角色仪表盘（按角色渲染不同内容）
-│   │   │   ├── employees/          # 员工管理
-│   │   │   ├── departments/        # 部门与岗位管理
-│   │   │   ├── cycles/             # 考核周期管理
-│   │   │   ├── kpi-templates/      # KPI模板管理
-│   │   │   ├── config/             # 系统配置
-│   │   │   ├── score-sheet/        # 评分页（自评/上级评/协作评）
-│   │   │   ├── my-performance/     # 我的绩效（历史趋势/档案/申诉）
-│   │   │   ├── summary/            # 分数汇总与强制分布处理
-│   │   │   ├── distribution-review/ # 强制分布处理（HR专用）
-│   │   │   ├── approval-workbench/ # 审批工作台（待审批/已审批）
-│   │   │   ├── peer-review/        # 协作评分待办
-│   │   │   ├── interview/          # 绩效面谈记录
-│   │   │   ├── appeal/             # 申诉提交与跟踪
-│   │   │   ├── audit/              # 操作日志审计
-│   │   │   ├── reports/            # 报表分析（分布图/趋势图/导出）
-│   │   │   └── admin/              # 系统配置（权重/等级规则/KPI模板）
-│   │   ├── App.vue
-│   │   └── main.js
+│   ├── index.html
 │   ├── package.json
-│   └── vite.config.js
-└── README.md                       # 项目启动说明
+│   ├── vite.config.js
+│   └── src/
+│       ├── api/                        # Axios 封装：按后端路由 1:1 映射
+│       │   ├── request.js            # Axios 实例 / 拦截器（Token / 错误 / 提示）
+│       │   ├── auth.js
+│       │   ├── users.js
+│       │   ├── employees.js
+│       │   ├── departments.js
+│       │   ├── cycles.js
+│       │   ├── scores.js
+│       │   ├── approvals.js
+│       │   ├── appeals.js
+│       │   ├── interviews.js
+│       │   ├── peers.js
+│       │   ├── reports.js
+│       │   ├── kpi-templates.js
+│       │   ├── kpi-adjustment.js
+│       │   ├── distribution.js
+│       │   ├── config.js
+│       │   ├── dashboard.js
+│       │   ├── logs.js
+│       │   └── notifications.js
+│       │
+│       ├── assets/                     # 静态资源：图片 / 字体 / 全局样式
+│       │   └── styles/
+│       │       ├── variables.css     # CSS 变量（主题色 / 间距）
+│       │       └── index.css         # 全局重置 + Element Plus 覆盖
+│       │
+│       ├── components/                 # 全局公共组件
+│       │   ├── AppHeader.vue
+│       │   ├── AppSidebar.vue
+│       │   ├── PageContainer.vue
+│       │   ├── BreadcrumbNav.vue
+│       │   ├── Layout.vue
+│       │   └── charts/               # ECharts 封装
+│       │       ├── TrendChart.vue
+│       │       ├── DistributionPie.vue
+│       │       └── ScoreBarChart.vue
+│       │
+│       ├── composables/                # Vue 3 Composition 复用逻辑
+│       │   ├── useAuth.js            # 当前用户 / 权限判断
+│       │   ├── usePermission.js      # 按钮级权限（v-permission）
+│       │   ├── useTable.js           # 分页 / 排序 / 筛选
+│       │   └── useForm.js            # 表单提交 / 重置 / 校验
+│       │
+│       ├── directives/                 # 自定义指令
+│       │   └── permission.js         # v-permission 角色/权限指令
+│       │
+│       ├── plugins/                    # 第三方库全局注册
+│       │   ├── element-plus.js       # Element Plus 组件 / 图标按需注册
+│       │   └── echarts.js            # ECharts 图表库注册
+│       │
+│       ├── router/                     # Vue Router
+│       │   ├── index.js              # 路由表 + 导航守卫（第 6.5 章）
+│       │   └── routes.js             # 路由定义（按模块分组）
+│       │
+│       ├── stores/                     # Pinia 状态管理
+│       │   ├── auth.js               # 用户认证 / Token / 权限
+│       │   └── app.js                # 全局状态：侧边栏 / 主题 / 消息未读数
+│       │
+│       ├── types/                      # TypeScript 类型定义（JS 项目保留 .d.ts 或 JSDoc）
+│       │   ├── api.ts                # 后端 API 请求/响应类型
+│       │   └── models.ts             # 业务实体类型
+│       │
+│       ├── utils/                      # 前端工具函数
+│       │   ├── auth.js               # Token 存取 / 权限解析
+│       │   ├── constants.js          # 枚举：角色 / 考核状态 / 审批状态
+│       │   ├── date.js               # 日期格式化 / 考核周期计算
+│       │   ├── format.js             # 分数 / 百分比 / 千分位
+│       │   └── validators.js         # 前端校验：手机号 / 邮箱 / 密码强度
+│       │
+│       ├── views/                      # 页面视图（与路由 1:1）
+│       │   ├── login/                # 登录页
+│       │   ├── dashboard/            # 首页仪表盘（按角色渲染）
+│       │   ├── employees/            # 员工管理 / 导入
+│       │   ├── departments/          # 部门与岗位管理
+│       │   ├── cycles/               # 考核周期管理
+│       │   ├── kpi-templates/        # KPI 模板
+│       │   ├── config/               # 系统配置（等级规则 / 权重 / 豁免）
+│       │   ├── score-sheet/          # 评分页（自评 / 上级评 / 协作评）
+│       │   ├── my-performance/       # 我的绩效（历史趋势 / 档案 / 申诉）
+│       │   ├── summary/              # 分数汇总与强制分布处理
+│       │   ├── distribution-review/  # 强制分布处理（HR 专用）
+│       │   ├── approval-workbench/   # 审批工作台
+│       │   ├── peer-review/          # 协作评分待办
+│       │   ├── interview/            # 绩效面谈
+│       │   ├── appeal/               # 申诉提交与跟踪
+│       │   ├── notifications/        # 通知收件箱（对应 4 章通知接口）
+│       │   ├── audit/                # 操作日志审计
+│       │   └── reports/              # 报表分析（分布图 / 趋势图 / 导出）
+│       │
+│       ├── App.vue
+│       └── main.js
+│
+├── tests/                              # 系统级测试（与 backend/tests 分离）
+│   ├── design/
+│   │   └── TEST_DESIGN_绩效考核评分系统_v1.0.md
+│   ├── cases/
+│   │   ├── TEST_CASES.md
+│   │   └── TEST_CASES_supplement.md
+│   └── scripts/                        # 历史测试脚本（可逐步迁移到 backend/tests）
+│       ├── conftest.py
+│       ├── utils.py
+│       └── test_*.py
+│
+├── data/                               # 运行时数据（不提交 Git）
+│   ├── uploads/                        # 员工导入 Excel
+│   ├── archives/                       # PDF 绩效档案
+│   └── db/                             # SQLite 数据库文件
+│
+├── logs/                               # 运行时日志
+│   ├── app.log                         # 应用日志
+│   └── audit/                          # 审计日志
+│
+└── scripts/                            # 运维脚本
+    ├── init_db.py                      # 首次部署初始化（创建管理员 / 默认配置）
+    ├── restart.bat                     # Windows 后端重启（tskill + uvicorn）
+    └── backup.bat                      # 数据库 + 归档文件备份
 ```
+
+### 7.1 后端 4 层架构目录映射
+
+| 架构层 | 对应目录 | 职责说明 |
+|--------|---------|---------|
+| **Router** | `app/routers/` | HTTP 入口：参数校验、依赖注入、调用 Service、返回响应。禁止写业务逻辑。 |
+| **Service** | `app/services/` | 业务编排：状态机、算法、规则校验、事务编排。禁止直接操作 ORM。 |
+| **Repository** | `app/repositories/` | 数据访问：封装 SQLAlchemy 查询、分页、聚合、多表 Join。返回模型或 DTO。 |
+| **Infrastructure** | `app/infrastructure/` | 技术设施：数据库连接、文件系统、PDF 引擎、定时任务、消息发送。 |
+
+**分层调用规则**：
+- Router → Service → Repository → Infrastructure（**严禁逆向调用**）
+- Service 之间可横向调用（如 `notification_rule_engine` 在状态流转后触发）
+- `utils/` 为纯函数，可被任意层调用
+
+### 7.2 关键文件与章节对应表
+
+| 文件/目录 | 对应章节 | 说明 |
+|-----------|---------|------|
+| `app/core/scheduler.py` | 2.1.4 | APScheduler 初始化：截止提醒、逾期标记、自动归档 |
+| `app/infrastructure/scheduler_jobs.py` | 2.1.4 | 具体 Job 实现：与业务状态机联动 |
+| `app/services/workflow_state_machine.py` | 5.4 | 10 状态流转核心：自评→上级→协作→汇总→审批→发布→归档 |
+| `app/services/distribution_enforcer.py` | 5.5 | 强制分布执行：推荐 + 确认 + 小部门豁免 |
+| `app/utils/data_masking.py` | 6.6 | 手机 / 邮箱 / 身份证脱敏工具 |
+| `app/utils/audit_logger.py` | 6.7 | 操作日志写入 middleware + 异步持久化 |
+| `app/core/security.py` | 6.4 | JWT 编解码 + bcrypt 密码哈希 |
+| `frontend/src/composables/` | - | Vue 3 组合式函数：权限 / 表格 / 表单复用 |
+| `frontend/src/plugins/` | - | 第三方库按需注册：Element Plus / ECharts |
+
+### 7.3 与实际已存在文件的映射
+
+当前项目已存在文件与上述目录的映射关系：
+
+| 已有文件 | 目标目录 | 迁移动作 |
+|---------|---------|---------|
+| `backend/app/database.py` | `backend/app/infrastructure/database.py` | 迁移 + 修正 import |
+| `backend/app/dependencies.py` | `backend/app/core/dependencies.py` | 迁移（依赖注入属于核心层） |
+| `backend/app/auth.py` | `backend/app/core/security.py` | 合并迁移 |
+| `backend/tests/` | 保持不变 | 已符合目录结构 |
+| `tests/scripts/` | 保持不变 | 历史脚本，可逐步迁移 |
+| `frontend/src/api/*.js` | 保持不变 | 已符合结构 |
+| `frontend/src/views/*/` | 保持不变 | 已符合结构（注意新增 `notifications/`） |
+| `frontend/src/components/*.vue` | 保持不变 | 已符合结构 |
 
 ---
 
+## 7.4 系统冷启动与初始化流程
+
+### 7.4.1 首次部署后初始化步骤
+
+系统冷启动时数据库为空，需按以下顺序完成初始化。系统提供 `scripts/init_db.py` 自动化脚本，首次部署后建议由运维人员执行一次：
+
+```bash
+cd backend
+python ../scripts/init_db.py
+```
+
+`init_db.py` 执行内容：
+1. **数据库迁移**：自动执行 `Base.metadata.create_all()`，确保 18 张表结构就绪
+2. **初始化默认系统配置**：向 `system_configs` 表写入以下默认值：
+   - `grade_rules`：A/B/C/D 四档等级规则（含 `max_ratio`）
+   - `dimension_weights`：工作业绩 60%、工作能力 20%、工作态度 20%
+   - `reviewer_weights`：自评 10%、上级 70%、协作 20%
+   - `small_dept_exemption`：阈值 5 人，默认关闭
+   - `peer_review_enabled`：默认开启
+3. **预置系统账号**（演示/测试用，首次登录强制改密）：
+
+| 角色 | 姓名 | 用户名 | 默认密码 | 工号 | 权限范围 | 首次登录要求 |
+|------|------|--------|---------|------|---------|-------------|
+| 系统管理员 | 张系管 | `zhangxiguan010001` | `010001@123` | 010001 | 全局配置权限 | 强制修改密码 |
+| HR 专员 | 张燕子 | `zhangyanzi020001` | `020001@123` | 020001 | 考核管理 + 数据查询 + 报表导出 | 强制修改密码 |
+
+> 密码安全说明：上述默认密码仅用于首次部署和内部测试，生产环境交付前必须修改。`init_db.py` 在执行时会将密码进行 bcrypt 哈希存储，并设置 `is_first_login=true`，系统登录接口将拦截首次登录并强制跳转密码修改页。
+
+4. **可选交互式创建自定义管理员**：脚本最后会询问是否额外创建自定义管理员，密码输入采用 `getpass` 隐藏回显，并实时校验密码强度（8-16 位，含大小写字母+数字）。
+
+初始化完成后，管理员按以下步骤完成业务准备：
+
+| 步骤 | 操作 | 负责角色 | 对应页面 | 注意事项 |
+|------|------|---------|---------|---------|
+| 1 | 管理员登录并修改默认密码 | Admin | 登录页 | 密码强度必须符合 6.9 节规则 |
+| 2 | 下载「员工批量导入模板」 | Admin/HR | 员工管理 | 系统动态生成 `.xlsx`，含数据校验批注 |
+| 3 | 填写模板并上传 | HR | 员工管理 | 直属上级工号必须已存在；部门/岗位不存在则自动创建 |
+| 4 | 预览校验 → 修正错误 → 确认导入 | HR | 员工管理 | 错误报告为 Excel 格式，标红+附错误原因列 |
+| 5 | 核对导入结果，补充缺失考核关系 | HR | 员工管理 | 重点检查直属上级、部门负责人是否设置正确 |
+| 6 | 配置岗位 KPI 模板 | HR/Manager | KPI 模板 | 为各岗位绑定默认考核指标与权重 |
+| 7 | 创建考核周期 | HR | 周期管理 | 配置维度权重、等级规则、审批链、截止时间 |
+| 8 | 启动考核 | HR | 周期管理 | 系统自动生成 `assessment_records` + `kpi_snapshots` + `score_drafts` |
 
 
-## 7.5 系统冷启动与初始化流程
 
-### 7.5.1 首次部署后初始化步骤
-
-系统冷启动时数据库为空，需按以下顺序初始化：
-
-1. 系统管理员创建管理员账号
-2. 管理员登录，下载「员工批量导入模板」
-3. HR 填写模板（工号、姓名、部门、岗位、直属上级工号）
-4. 上传模板，系统预览校验，修正错误，确认导入
-5. 核对导入结果，补充缺失的考核关系
-6. 配置岗位 KPI 模板
-7. 配置考核周期（维度权重、等级规则、审批链）
-8. 发起首次考核
-
-
-
-### 7.5.2 Excel 导入模板规范
+### 7.4.2 Excel 导入模板规范
 
 **模板字段**：
 
@@ -1191,13 +2885,16 @@ performance_evaluation_system/
 | 入职日期 | ❌ | YYYY-MM-DD | 2023-01-15 |
 | 状态 | ❌ | 在职/离职；默认在职 | 在职 |
 
-**模板下载**：系统提供  模板文件，包含：
-- 第 1 行为表头（字段名）
+**模板下载**：系统提供 API `GET /employees/import-template` 动态生成 `.xlsx` 模板文件，包含：
+- 第 1 行为表头（字段名），含数据校验批注
 - 第 2 行为示例数据（供 HR 参考格式）
 - 第 3 行起为待填写区域
 - 字段旁附批注说明（如「直属上级工号必须已在系统中存在」）
+- 模板中预置「数据验证」规则：工号长度 ≤50、日期格式必须为 YYYY-MM-DD、状态仅允许「在职/离职」
 
-### 7.5.3 导入校验与错误报告
+**文件格式**：Excel 2007+ (.xlsx)，单 Sheet，最大支持 5000 行数据导入。
+
+### 7.4.3 导入校验与错误报告
 
 **前置校验（预览阶段）**：
 - 工号重复检测（模板内 + 数据库内）
@@ -1207,16 +2904,22 @@ performance_evaluation_system/
 - 日期格式校验
 
 **导入执行**：
-- 校验通过的数据批量插入 、、 表
-- 部门/岗位自动创建时记录 
-- 导入完成后生成「导入结果报告」：成功 X 条 / 失败 Y 条
+- 校验通过的数据在**单个事务**中批量插入 `employees`、`departments`、`positions` 表
+- 部门/岗位自动创建时同步写入 `operation_logs` 审计日志（操作类型：AUTO_CREATE_DEPT / AUTO_CREATE_POSITION）
+- 导入完成后生成「导入结果报告」：成功 X 条 / 失败 Y 条 / 自动创建部门 N 个 / 自动创建岗位 M 个
+- 若事务中任意一条记录失败，**整批回滚**，返回错误报告供 HR 修正后重新上传（保证数据一致性）
+
+**批量导入性能参数**：
+- 单次导入上限：5000 条（防止内存溢出）
+- 数据库写入：使用 SQLAlchemy `session.bulk_insert_mappings()` 批量插入，避免逐条 ORM 实例化开销
+- 大文件处理：前端分片读取（Chunk），后端流式解析（Streaming），避免一次性加载大文件到内存
 
 **错误报告格式**：
 返回 Excel 文件，在原模板基础上增加「错误原因」列，标红错误行，HR 可直接修正后重新上传。
 
 
 
-### 7.5.4 日常运维流程
+### 7.4.4 日常运维流程
 
 **新员工入职**：
 - HR 在后台「员工管理」页面点击「新增员工」
@@ -1226,55 +2929,441 @@ performance_evaluation_system/
 **员工调岗/离职**：
 - HR 在员工列表页搜索员工，点击「编辑」
 - 修改部门/岗位/直属上级，或标记状态为「离职」
-- 已离职员工自动从后续考核周期中排除（）
+- 已离职员工自动从**后续未启动的考核周期**中排除（已启动周期中的记录保留，确保历史数据完整性）
+
+**数据备份**：
+- 每日凌晨 2:00 执行 `scripts/backup.bat`，自动备份 SQLite 数据库文件到 `data/backups/YYYYMMDD/`
+- 备份保留策略：保留最近 30 天，过期自动清理
+- PDF 归档文件同步备份至 `data/backups/YYYYMMDD/archives/`
+
+**日志轮转**：
+- `logs/app.log`：按天切割，单文件上限 50MB，保留 30 天
+- `logs/audit/`：审计日志按月归档，保留 2 年（合规要求）
+- 使用 Python `logging.handlers.TimedRotatingFileHandler` 实现
+
+**服务重启**：
+- Windows 环境严禁使用 `--reload`（见 Memory），使用 `scripts/restart.bat`：
+  ```batch
+  @echo off
+  tskill uvicorn
+  timeout /t 2 /nobreak >nul
+  start /b uvicorn app.main:app --host 0.0.0.0 --port 8000
+  ```
+- 重启前确保 `data/` 和 `logs/` 目录有写权限
+
+### 7.4.5 启动验证与优雅关闭
+
+**健康检查接口**：
+- `GET /health`：返回数据库连接状态、磁盘剩余空间、调度器运行状态
+- 部署后首次调用确认各组件正常
+
+**优雅关闭**：
+- 收到 `SIGTERM` 信号后，先停止 APScheduler（不再触发新 Job），等待正在执行的 Job 完成（最多 30 秒）
+- 关闭数据库连接池，确保未提交事务回滚
+- 记录 `SYSTEM_SHUTDOWN` 审计日志
 
 ## 8. 部署方案
 
 ### 8.1 开发环境启动
 
-**后端启动**:
+> **Windows 环境约束**：开发阶段后端也**严禁使用 `--reload`**（见 Memory），热更新通过 IDE 手动重启或 `scripts/restart.bat` 实现。
+
+**环境准备**（首次）：
+
 ```bash
+# 1. 后端依赖
 cd backend
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# 2. 前端依赖
+cd ../frontend
+npm install
 ```
 
-**前端启动**:
+**启动步骤**（每次开发）：
+
 ```bash
+# 后端（窗口 1）
+cd backend
+venv\Scripts\activate
+python ../scripts/init_db.py        # 首次/重置时执行
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 前端（窗口 2）
 cd frontend
-npm install
 npm run dev
 ```
 
-**数据库**: SQLite 零配置，首次启动自动创建。
+**开发环境目录要求**：
+项目根目录下必须存在 `data/` 和 `logs/` 目录，SQLite 数据库将自动创建在 `data/db/performance_evaluation.db`：
 
-### 8.2 生产环境部署
-- 后端使用 `uvicorn` + `gunicorn`（Linux）或直接使用 `uvicorn`（Windows）。
-- 数据库迁移：`alembic upgrade head`。
-- 前端构建：`npm run build`，产物部署到静态文件服务器或让 FastAPI 挂载 `dist/` 目录。
-- 系统配置：通过环境变量或 `config.py` 配置 JWT 密钥、数据库路径等。
+```bash
+mkdir data\db data\uploads data\archives
+mkdir logs\audit
+```
+
+**接口文档**：
+开发环境自动 Swagger 文档：`http://localhost:8000/docs`
 
 ---
 
+### 8.2 生产环境部署（Windows 服务器）
+
+本项目为内网 Windows 环境部署，推荐方案如下：
+
+**部署架构**：
+
+```
+Windows 服务器
+├── Nginx / IIS（反向代理，可选）
+│   └── 80/443 → localhost:8000
+├── performance_evaluation_system/
+│   ├── backend/          # FastAPI 服务
+│   ├── frontend/dist/    # 构建后的静态文件
+│   ├── data/             # 数据库 + 上传文件 + 归档（定期备份）
+│   ├── logs/             # 应用日志 + 审计日志
+│   └── scripts/          # restart.bat / backup.bat / init_db.py
+└── 计划任务（Windows Task Scheduler）
+    ├── 每日 02:00 执行 backup.bat
+    └── 系统启动时执行 start.bat
+```
+
+**部署步骤**：
+
+1. **环境准备**
+   ```powershell
+   # 安装 Python 3.11+ 和 Node.js 18+
+   # 克隆项目到 D:\apps\performance_evaluation_system\
+   cd D:\apps\performance_evaluation_system
+   ```
+
+2. **后端部署**
+   ```bash
+   cd backend
+   python -m venv .venv
+   .venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+
+3. **前端构建**
+   ```bash
+   cd frontend
+   npm install
+   npm run build
+   ```
+   构建产物输出到 `frontend/dist/`，后端通过 FastAPI 挂载该目录提供静态文件服务。
+
+4. **初始化数据库**
+   ```bash
+   cd backend
+   venv\Scripts\activate
+   python ../scripts/init_db.py
+   ```
+
+5. **启动服务**
+   使用 `scripts/start.bat`（创建该脚本）：
+   ```batch
+   @echo off
+   cd /d D:\apps\performance_evaluation_system\backend
+   call venv\Scripts\activate
+   start /b uvicorn app.main:app --host 0.0.0.0 --port 8000
+   ```
+
+6. **注册 Windows 服务（推荐）**
+   使用 [NSSM](https://nssm.cc/) 将后端注册为 Windows 服务，确保开机自启：
+   ```powershell
+   nssm install PES-Backend
+   # 应用路径: D:\apps\performance_evaluation_system\backend\venv\Scripts\python.exe
+   # 启动参数: -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+   # 工作目录: D:\apps\performance_evaluation_system\backend
+   nssm start PES-Backend
+   ```
+
+---
+
+### 8.3 环境变量配置
+
+生产环境通过环境变量或 `backend/app/core/config.py` 配置，关键项：
+
+| 变量名 | 默认值 | 说明 | 是否必填 |
+|--------|--------|------|---------|
+| `DATABASE_URL` | `sqlite:///.../data/db/performance_evaluation.db` | 数据库路径 | 否 |
+| `JWT_SECRET_KEY` | 无 | JWT 签名密钥，生产环境必须设置强随机字符串 | ✅ |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `120` | Access Token 有效期（分钟） | 否 |
+| `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Refresh Token 有效期（天） | 否 |
+| `ALEMBIC_DB_URL` | 同 DATABASE_URL | 迁移工具数据库路径 | 否 |
+| `LOG_LEVEL` | `INFO` | 日志级别：DEBUG/INFO/WARNING/ERROR | 否 |
+| `BACKUP_RETENTION_DAYS` | `30` | 数据库备份保留天数 | 否 |
+| `MAX_UPLOAD_SIZE_MB` | `10` | Excel 上传文件大小上限 | 否 |
+
+**环境变量加载优先级**：`系统环境变量 > .env 文件 > config.py 默认值`
+
+---
+
+### 8.4 前端构建与部署
+
+**开发模式**：`npm run dev`（Vite 热更新，代理到 localhost:8000）
+
+> **开发环境路径约定**：后端虚拟环境统一创建在 `backend/.venv/` 目录下，与项目源码分离，避免污染全局 Python 环境。
+
+**后端依赖安装与激活**：
+```bash
+cd backend
+python -m venv .venv              # 创建虚拟环境（仅首次）
+.venv\Scripts\activate            # Windows 激活虚拟环境
+pip install -r requirements.txt   # 安装依赖
+```
+
+**启动后端（开发模式）**：
+```bash
+cd backend
+.venv\Scripts\activate            # 每次启动前必须激活
+python ../scripts/init_db.py      # 首次/重置时执行
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+**生产构建**：
+```bash
+cd frontend
+npm run build
+```
+
+**后端挂载静态文件**（`backend/app/main.py` 中配置）：
+```python
+from fastapi.staticfiles import StaticFiles
+app.mount("/", StaticFiles(directory="../frontend/dist", html=True), name="static")
+```
+
+> 注意：API 路由需注册在静态文件挂载之前，避免 `/api` 请求被静态文件拦截。
+
+---
+
+### 8.5 数据库备份与恢复
+
+**自动备份（scripts/backup.bat）**：
+```batch
+@echo off
+set BACKUP_DIR=D:\apps\performance_evaluation_system\data\backups\%date:~0,4%%date:~5,2%%date:~8,2%
+set DB_PATH=D:\apps\performance_evaluation_system\data\db\performance_evaluation.db
+set ARCHIVE_PATH=D:\apps\performance_evaluation_system\data\archives
+
+mkdir %BACKUP_DIR%
+copy %DB_PATH% %BACKUP_DIR%\
+xcopy %ARCHIVE_PATH% %BACKUP_DIR%\archives\ /s /e /i /y
+
+forfiles /p "D:\apps\performance_evaluation_system\data\backups" /s /d -30 /c "cmd /c rmdir /s /q @path"
+```
+
+**备份策略**：
+- 频率：每日凌晨 2:00（Windows 计划任务）
+- 保留：30 天自动清理
+- 内容：SQLite 数据库 + PDF 归档文件
+
+**恢复步骤**：
+1. 停止后端服务
+2. 从备份目录复制 `performance_evaluation.db` 到 `data/db/`
+3. 重启服务
+
+---
+
+### 8.6 服务监控与日志
+
+**健康检查**：
+```bash
+curl http://localhost:8000/health
+```
+返回：数据库连接状态、磁盘空间、调度器状态、运行时长。
+
+**日志管理**：
+- 应用日志：`logs/app.log`（按天轮转，保留 30 天）
+- 审计日志：`logs/audit/`（按月归档，保留 2 年）
+- 错误日志：后端自动捕获异常并写入 `logs/error.log`
+
+**Windows 计划任务监控**：
+配置任务监控脚本，若服务异常退出，自动发送邮件/企业微信通知（可选扩展）。
+
+---
+
+### 8.7 升级与回滚
+
+**升级流程**：
+1. 执行 `scripts/backup.bat` 备份当前数据
+2. 拉取最新代码
+3. 执行数据库迁移：`cd backend && alembic upgrade head`
+4. 如有新系统配置，运行 `python ../scripts/init_db.py`（已存在的配置不会重复插入）
+5. 前端重新构建：`npm run build`
+6. 重启服务：`scripts/restart.bat`
+
+**回滚流程**：
+1. 停止服务
+2. 从备份目录恢复数据库文件
+3. 回滚代码到上一版本（Git 标签或分支）
+4. 数据库结构回滚：`alembic downgrade -1`（按迁移版本逐步回退）
+5. 重启服务
+
 ## 9. 开发规范
 
-- **命名**: Python 函数/变量使用 `snake_case`，Vue 组件使用 `PascalCase`。
-- **类型注解**: 后端所有函数使用 Python 类型注解，Pydantic 模型定义请求/响应结构。
-- **API 版本**: 所有接口以 `/api/v1` 开头，便于后续扩展 v2。
-- **错误码**: 统一返回结构 `{code, message, data}`，HTTP 状态码与业务码分离。
-- **测试**: 采用 pytest，每个 service 和 router 必须写单元测试，测试数据使用独立 SQLite 内存数据库。
+### 9.1 代码风格与命名
+
+| 语言/框架 | 规范 | 示例 |
+|-----------|------|------|
+| Python | PEP 8，`snake_case` | `score_calculator.py`, `get_employee_by_id()` |
+| Vue 组件 | `PascalCase` | `DistributionReview.vue`, `TrendChart.vue` |
+| Vue 组合式函数 | `camelCase`，前缀 `use` | `useAuth.js`, `useTable.js` |
+| 常量/枚举 | `SCREAMING_SNAKE_CASE` | `MAX_UPLOAD_SIZE_MB`, `ROLE_ADMIN` |
+| 数据库表 | `snake_case`，复数名词 | `assessment_records`, `score_details` |
+| Alembic 迁移 | ` snake_case`，前缀日期 | `20240701_add_max_ratio_to_grade_rules.py` |
+
+### 9.2 类型注解与模型定义
+
+- **后端所有函数**必须使用 Python 类型注解，返回值类型不可省略
+- **Pydantic Schema** 与 SQLAlchemy Model 分离：`schemas.py` 仅用于 API 出入参，`models.py` 仅用于数据库映射
+- **DTO 命名**：请求体以 `Request`/`Create`/`Update` 结尾，响应体以 `Response`/`Out` 结尾
+  ```python
+  class EmployeeCreateRequest(BaseModel): ...
+  class EmployeeResponse(BaseModel): ...
+  ```
+
+### 9.3 API 设计规范
+
+- **版本控制**：所有接口以 `/api/v1` 开头，便于后续扩展 v2
+- **统一响应结构**：
+  ```json
+  {
+    "code": 200,
+    "message": "success",
+    "data": { }
+  }
+  ```
+- **HTTP 状态码与业务码分离**：HTTP 状态码表示传输层结果（200/400/401/500），`code` 字段表示业务层结果
+- **错误码规范**：
+  - `1xxx`：通用错误（1001=参数校验失败，1002=未授权，1003=资源不存在）
+  - `2xxx`：认证错误（2001=密码错误，2002=账号锁定，2003=Token 过期）
+  - `3xxx`：业务逻辑错误（3001=状态机非法流转，3002=强制分布超限，3003=评分已锁定）
+
+### 9.4 分层架构编码约束
+
+基于 7.1 节 4 层架构，严禁以下违规行为：
+
+| 违规层级 | 示例 | 正确做法 |
+|---------|------|---------|
+| Router 写业务逻辑 | 在 `routers/scores.py` 中计算加权分数 | Router 仅调用 `ScoreCalculatorService.calculate()` |
+| Service 直接操作 ORM | `db.query(Employee).filter(...)` | 通过 `employee_repo.get_by_id()` 访问 |
+| Repository 返回 ORM 对象 | `return db.query(Employee).first()` | 返回 Pydantic DTO 或字典，解耦 ORM |
+| Infrastructure 导入 Service | `scheduler_jobs.py` 中 `from app.services import ...` | 调度 Job 仅通过事件或消息队列触发，不直接依赖 Service |
+
+### 9.5 安全编码规范
+
+- **禁止硬编码密钥**：JWT_SECRET_KEY、数据库密码等必须通过环境变量或 `.env` 注入
+- **输入校验**：所有用户输入（URL 参数、表单、文件上传）必须经过 Pydantic 或自定义 Validator 校验
+- **SQL 注入防护**：禁止字符串拼接 SQL，所有查询必须通过 SQLAlchemy ORM 或参数化查询
+- **XSS 防护**：后端返回 HTML 内容时必须转义；前端使用 `v-text` 而非 `v-html` 渲染用户输入
+- **敏感数据**：日志中禁止输出密码、Token、身份证号；数据库中密码必须 bcrypt 哈希存储
+
+### 9.6 测试规范
+
+| 测试类型 | 工具 | 覆盖率要求 | 说明 |
+|---------|------|-----------|------|
+| 单元测试 | pytest | Service ≥ 80%，Router ≥ 60% | 每个 Service 函数至少 2 个用例（成功/失败） |
+| 集成测试 | pytest + TestClient | 核心流程 100% | 登录→创建周期→评分→审批→发布 完整链路 |
+| 前端组件测试 | Vitest | 关键组件 ≥ 70% | 表单校验、权限按钮、图表渲染 |
+| E2E 测试 | Playwright | 主流程覆盖 | 自评→上级评→汇总→发布 端到端 |
+
+**测试数据隔离**：
+- 单元测试使用 `sqlite:///:memory:` 内存数据库，每个测试用例独立 Session
+- 集成测试使用 `conftest.py` 共享 Fixture（TestClient、内存 DB、认证 Token）
+- 禁止测试代码修改生产数据库或真实文件系统（使用 `tmp_path` / `mock`）
+
+### 9.7 Git 工作流与代码审查
+
+- **分支模型**：`main`（生产）、`develop`（开发）、`feature/*`（功能）、`hotfix/*`（紧急修复）
+- **提交信息**：遵循 Conventional Commits
+  ```
+  feat: 新增强制分布确认接口
+  fix: 修复状态机 pending_peer → pending_summary 流转异常
+  test: 补充评分草稿合并算法单元测试
+  docs: 更新 TECH 文档 7.4 部署流程
+  ```
+- **Merge 要求**：必须通过 CI 测试（pytest + Vitest），至少 1 人 Code Review
+
+### 9.8 文档注释规范
+
+- **Python**：Google Style Docstring，所有 Service 和公共函数必须写文档字符串
+  ```python
+  def calculate_weighted_score(
+      self, record_id: int, weights: DimensionWeights
+  ) -> float:
+      """计算加权总分。
+
+      Args:
+          record_id: 考核记录 ID
+          weights: 维度权重配置
+
+      Returns:
+          加权总分，保留 2 位小数
+
+      Raises:
+          BizError: 记录不存在或状态不允许计算
+      """
+  ```
+- **Vue**：复杂逻辑块添加行内注释，组件顶部说明 Props/Events/Slots
 
 ---
 
 ## 10. 技术风险与应对
 
-| 风险 | 影响 | 应对措施 |
-|------|------|---------|
-| SQLite 并发写入性能瓶颈 | 50人同时提交可能锁等待 | MVP 场景下并发量低，可控；后续迁移 MySQL 只需改数据库连接串 |
-| 前后端联调问题 | 接口不一致 | 使用 FastAPI 自动生成的 Swagger 文档 (`/docs`) 作为接口契约 |
-| 复杂报表导出性能 | 大数据量导出慢 | MVP 数据量有限，导出采用流式生成；后续可引入异步任务队列 |
-| 考核状态机 bug | 状态流转错误导致流程卡住 | 状态流转封装为统一函数，写状态变更日志，支持管理员手动干预 |
-| 强制分布降级引发争议 | 高分员工被系统强制降级（如 95 分从 A 降至 B），员工对结果不满 | 保留 `original_grade` 完整审计链；面谈时由上级解释降级原因；支持申诉复核 |
+### 10.1 数据库层风险
+
+| 风险 | 影响等级 | 说明 | 应对措施 |
+|------|---------|------|---------|
+| SQLite 并发写入瓶颈 | 中 | 50+ 人同时提交可能出现锁等待 | MVP 场景并发可控；数据库连接串预留 MySQL 迁移能力，切换仅需修改 `DATABASE_URL` |
+| SQLite 文件损坏 | 高 | 单文件数据库，磁盘故障或异常断电可能导致损坏 | 每日自动备份（`backup.bat`）；数据库文件放在 `data/db/` 便于快照；长期运行建议迁移至 MySQL |
+| 数据丢失 | 高 | 无主从复制，误删或 Bug 导致数据不可恢复 | 30 天滚动备份；关键操作（评分提交、审批）写入 `operation_logs` 审计日志，支持追溯 |
+| 员工数据泄露 | 高 | 绩效数据敏感，泄露影响员工信任 | 6.6 节数据脱敏；6.4 节 JWT 鉴权；操作日志全量记录；数据库文件仅服务进程可访问 |
+
+### 10.2 应用层风险
+
+| 风险 | 影响等级 | 说明 | 应对措施 |
+|------|---------|------|---------|
+| 考核状态机 Bug | 高 | 状态流转错误导致流程卡住或数据不一致 | 状态流转统一封装 `workflow_state_machine.py`，禁止直接 `UPDATE` 状态；每次流转写入状态变更日志；管理员可通过后台手动重置状态（需审批） |
+| 强制分布降级争议 | 高 | 高分员工被系统强制降级（如 95 分从 A 降至 B），引发不满 | 保留 `original_grade` 完整审计链；降级时强制填写原因；面谈环节由 HR/上级解释；支持申诉复核（5.12 节） |
+| 异常评分未检测 | 中 | 上级给所有下属满分、协作评分人恶意低分 | `anomaly_detector.py` 自动检测：同批次分差 > 15 分触发预警；评分分布异常（全部相同）自动标记 |
+| 定时任务遗漏 | 中 | Windows 服务器重启后 APScheduler 未恢复，导致截止提醒未发送 | 使用 NSSM 注册服务并配置开机自启；`scheduler.py` 启动时自动补偿检查（扫描过去 24h 未执行的任务） |
+| PDF 归档失败 | 低 | 依赖外部引擎（Playwright/WeasyPrint），环境缺失导致生成失败 | 归档 Job 失败时写入 `notification_sender` 告警；支持降级方案（先生成 HTML 预览，延迟生成 PDF） |
+
+### 10.3 前后端与基础设施风险
+
+| 风险 | 影响等级 | 说明 | 应对措施 |
+|------|---------|------|---------|
+| 前后端联调不一致 | 中 | 接口字段变更导致前端报错 | FastAPI 自动生成 Swagger (`/docs`) 作为唯一接口契约；Pydantic Schema 变更时同步更新前端 `types/api.ts`；PR 中必须包含 API 变更说明 |
+| 前端构建兼容性 | 低 | Node 版本差异导致构建失败 | `package.json` 锁定 `engines` 字段；CI 中使用固定 Node 版本；构建产物提交到 `frontend/dist` 作为兜底 |
+| 系统单点维护 | 中 | 核心算法和状态机由单一开发者维护，人员离职导致知识断层 | 所有算法写入 TECH 文档并附流程图；代码注释覆盖率 ≥ 80%；关键模块（状态机、分布算法）必须 2 人 Code Review |
+| 备份失败未感知 | 高 | `backup.bat` 执行失败（磁盘满、权限不足），管理员未及时发现 | 备份脚本返回非零退出码时写入 `logs/error.log`；健康检查接口 `/health` 包含最近备份时间戳；超过 48h 未备份触发告警 |
+
+### 10.4 安全与合规风险
+
+| 风险 | 影响等级 | 说明 | 应对措施 |
+|------|---------|------|---------|
+| XSS 攻击 | 中 | 员工姓名、申诉内容中包含恶意脚本 | 前端使用 `v-text` 渲染；后端返回用户生成内容时做 HTML 转义；富文本输入（如有）使用白名单过滤 |
+| CSRF 攻击 | 低 | 内网场景风险较低，但仍需防范 | JWT Token 存储在 HttpOnly Cookie 或前端内存中；关键操作（审批、发布）二次确认 |
+| 越权访问 | 高 | 普通员工通过修改 URL 访问 HR 审批接口 | 6.1 节 RBAC 权限矩阵；每个 Router 使用 `dependencies` 校验角色；敏感接口增加数据归属校验（如 `record.employee_id == current_user.employee_id`） |
+| 密码暴力破解 | 中 | 默认密码或弱密码被猜解 | 6.9 节密码强度校验；5 次失败锁定 15 分钟；密码 bcrypt 哈希 + salt；禁止密码字段在日志中输出 |
+
+### 10.5 风险监控与应急预案
+
+**日常监控指标**：
+- 数据库备份成功率（目标：100%）
+- 定时任务执行成功率（目标：≥ 99%）
+- 接口平均响应时间（目标：P95 < 500ms）
+- 错误日志增长率（目标：单日新增 < 10 条）
+
+**应急预案**：
+- **服务崩溃**：NSSM 自动重启，若 3 次重启失败，发送告警通知管理员
+- **数据库损坏**：立即停止写入，从最近备份恢复，核对 `operation_logs` 补录缺失数据
+- **状态机卡死**：管理员通过后台「系统干预」功能手动调整状态（需双人确认 + 审计日志）
+- **评分数据异常**：启动 `appeal_recalculator.py` 批量重算，通知相关员工复核
 
 ---
 
