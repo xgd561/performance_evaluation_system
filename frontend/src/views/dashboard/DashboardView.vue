@@ -1,5 +1,9 @@
 <template>
   <div class="dashboard-container">
+    <!-- 高管仪表盘：独立组件，只读 -->
+    <ExecutiveDashboard v-if="userRole === 'executive'" />
+
+    <template v-else>
     <!-- 顶部：6阶段全流程图 -->
     <el-card class="flow-card" shadow="hover">
       <template #header>
@@ -177,6 +181,7 @@
         </el-table-column>
       </el-table>
     </el-card>
+    </template>
   </div>
 </template>
 
@@ -192,6 +197,7 @@ import {
 } from '@element-plus/icons-vue'
 import { listCycles, getCycleProgress } from '@/api/cycles'
 import request from '@/api/request'
+import ExecutiveDashboard from './ExecutiveDashboard.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()

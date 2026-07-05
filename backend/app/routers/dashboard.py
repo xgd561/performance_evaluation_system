@@ -136,6 +136,111 @@ def get_dashboard(
     }
 
 
+@router.get("/executive")
+def get_executive_dashboard(
+    db: Session = Depends(get_db),
+    user = Depends(require_role("executive")),
+):
+    """高管仪表盘聚合数据"""
+    # 1. 基础统计
+    total_employees = db.query(Employee).filter(Employee.is_active == True).count()
+
+    # 当前活跃周期
+    current_cycle = db.query(AssessmentCycle).filter(
+        AssessmentCycle.status.notin_(["not_started", "archived"])
+    ).order_by(AssessmentCycle.created_at.desc()).first()
+
+    # 考核覆盖率
+    coverage_rate = 0.0
+    if current_cycle and total_employees > 0:
+        covered = db.query(AssessmentRecord).filter(
+            AssessmentRecord.cycle_id == current_cycle.id
+        ).count()
+        coverage_rate = round(covered / total_employees * 100, 1)
+
+    # 公司平均总分（仅 published/archived）
+    avg_score = db.query(func.avg(AssessmentRecord.total_score)).filter(
+        AssessmentRecord.status.in_(["published", "archived"]),
+        AssessmentRecord.total_score.isnot(None)
+    ).scalar() or 0.0
+
+    # 待审批数
+    pending_approvals = db.query(ApprovalRecord).filter(ApprovalRecord.action == None).count()
+
+    # 2. 绩效分布饼图数据
+    grade_distribution = {"A": 0, "B": 0, "C": 0, "D": 0}
+    published_records = db.query(AssessmentRecord).filter(
+        AssessmentRecord.status.in_(["published", "archived"]),
+        AssessmentRecord.grade.isnot(None)
+    ).all()
+    for r in published_records:
+        if r.grade in grade_distribution:
+            grade_distribution[r.grade] += 1
+
+    # 3. 部门平均分对比
+    departments = db.query(Department).all()
+    department_avg = []
+    for dept in departments:
+        dept_emp_ids = [e.id for e in db.query(Employee).filter(Employee.department_id == dept.id).all()]
+        if not dept_emp_ids:
+            continue
+        dept_avg = db.query(func.avg(AssessmentRecord.total_score)).filter(
+            AssessmentRecord.employee_id.in_(dept_emp_ids),
+            AssessmentRecord.status.in_(["published", "archived"]),
+            AssessmentRecord.total_score.isnot(None)
+        ).scalar() or 0.0
+        department_avg.append({
+            "id": dept.id,
+            "name": dept.name,
+            "avg_score": round(float(dept_avg), 2),
+        })
+
+    # 4. 近 4 季度趋势（按 cycle 的 end_date 分季度）
+    cycles = db.query(AssessmentCycle).filter(
+        AssessmentCycle.status.in_(["published", "archived"])
+    ).order_by(AssessmentCycle.end_date.desc()).limit(4).all()
+    quarterly_trend = []
+    for c in reversed(cycles):
+        cycle_avg = db.query(func.avg(AssessmentRecord.total_score)).filter(
+            AssessmentRecord.cycle_id == c.id,
+            AssessmentRecord.total_score.isnot(None)
+        ).scalar() or 0.0
+        quarterly_trend.append({
+            "cycle_name": c.name,
+            "avg_score": round(float(cycle_avg), 2),
+        })
+
+    # 5. 强制调整人员列表
+    adjusted_records = db.query(AssessmentRecord).filter(
+        AssessmentRecord.is_distribution_override == True,
+        AssessmentRecord.status.in_(["published", "archived"])
+    ).limit(20).all()
+    adjusted_employees = []
+    for r in adjusted_records:
+        emp = db.query(Employee).filter(Employee.id == r.employee_id).first()
+        adjusted_employees.append({
+            "record_id": r.id,
+            "employee_name": emp.name if emp else "—",
+            "employee_no": emp.employee_no if emp else "—",
+            "original_grade": r.original_grade,
+            "adjusted_grade": r.grade,
+            "override_reason": r.override_reason or "强制分布调整",
+        })
+
+    return {
+        "stats": {
+            "total_employees": total_employees,
+            "coverage_rate": coverage_rate,
+            "avg_total_score": round(float(avg_score), 2),
+            "pending_approvals": pending_approvals,
+        },
+        "grade_distribution": grade_distribution,
+        "department_avg": department_avg,
+        "quarterly_trend": quarterly_trend,
+        "adjusted_employees": adjusted_employees,
+    }
+
+
 @router.get("/cycles")
 def dashboard_cycles(
     db: Session = Depends(get_db),

@@ -29,6 +29,7 @@ export const routes = [
       { path: 'config', name: 'Config', component: () => import('@/views/config/ConfigView.vue'), meta: { roles: ['admin'] } },
       { path: 'audit-logs', name: 'AuditLogs', component: () => import('@/views/audit/OperationLog.vue'), meta: { roles: ['admin', 'hr'] } },
       { path: 'appeals', name: 'Appeals', component: () => import('@/views/appeal/AppealList.vue'), meta: { roles: ['admin', 'hr'] } },
+      { path: 'appeal-detail', name: 'AppealDetail', component: () => import('@/views/appeal/AppealDetail.vue'), meta: { roles: ['admin', 'hr'] } },
       { path: 'summary', name: 'Summary', component: () => import('@/views/summary/SummaryDashboard.vue'), meta: { roles: ['admin', 'hr'] } },
       { path: 'reports', name: 'Reports', component: () => import('@/views/reports/ReportExport.vue'), meta: { roles: ['admin', 'hr'] } },
       { path: 'distribution-review', name: 'DistributionReview', component: () => import('@/views/distribution-review/DistributionReview.vue'), meta: { roles: ['admin', 'hr'] } },

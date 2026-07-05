@@ -19,3 +19,7 @@ export function getAppeal(appealId) {
 export function reviewAppeal(appealId, data) {
   return request.post(`/appeals/${appealId}/review`, data)
 }
+
+export function resolveAppeal(appealId, data) {
+  return request.post(`/appeals/${appealId}/resolve`, data)
+}
