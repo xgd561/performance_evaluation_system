@@ -207,17 +207,18 @@ class KpiTemplateGroupOut(BaseModel):
 
 # ------------------ Assessment Cycle ------------------
 class AssessmentCycleCreate(BaseModel):
-    name: str
-    type: str
+    name: str = Field(..., min_length=1, max_length=200)
+    type: str = Field(..., min_length=1)
     start_date: date
     end_date: date
     self_due_date: Optional[date] = None
     manager_due_date: Optional[date] = None
     peer_due_date: Optional[date] = None
+    peer_review_enabled: Optional[bool] = True
+    department_ids: Optional[List[int]] = None
     weights: Dict[str, int]
     grade_rules: Dict[str, Any]
     small_dept_exemption: Optional[bool] = True
-    peer_review_enabled: Optional[bool] = True
 
     @field_validator('weights')
     @classmethod
@@ -242,6 +243,43 @@ class AssessmentCycleCreate(BaseModel):
         if not v:
             raise ValueError("等级规则不能为空")
         return v
+
+    @field_validator('department_ids')
+    @classmethod
+    def check_department_ids(cls, v):
+        if v is not None and len(v) == 0:
+            raise ValueError("考核对象（部门列表）不能为空")
+        return v
+
+    @model_validator(mode='after')
+    def check_deadline_order(self):
+        """截止时间递增：self_due_date < manager_due_date < peer_due_date"""
+        s = self.self_due_date
+        m = self.manager_due_date
+        p = self.peer_due_date
+
+        if s and m and s >= m:
+            raise ValueError("自评截止时间必须早于上级评截止时间")
+        if m and p and m >= p:
+            raise ValueError("上级评截止时间必须早于协作评截止时间")
+        if s and p and s >= p:
+            raise ValueError("自评截止时间必须早于协作评截止时间")
+        return self
+
+    @model_validator(mode='after')
+    def check_dates_in_future(self):
+        """时间必须大于等于当前日期（今天及之后）"""
+        today = date.today()
+        for field_name, value in [
+            ("start_date", self.start_date),
+            ("end_date", self.end_date),
+            ("self_due_date", self.self_due_date),
+            ("manager_due_date", self.manager_due_date),
+            ("peer_due_date", self.peer_due_date),
+        ]:
+            if value is not None and value < today:
+                raise ValueError(f"{field_name} 不能早于今天")
+        return self
 
 class AssessmentCycleUpdate(BaseModel):
     name: Optional[str] = None
@@ -419,6 +457,20 @@ class GradeRulesSchema(BaseModel):
 class GradeRulesConfig(GradeRulesSchema):
     pass
 
+
+# ------------------ Notification ------------------
+class NotificationOut(BaseModel):
+    id: int
+    user_id: int
+    title: str
+    content: Optional[str] = None
+    type: Optional[str] = None
+    is_read: bool = False
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
 class DimensionWeightsConfig(BaseModel):
     performance: Optional[int] = None
     ability: Optional[int] = None
@@ -468,3 +520,21 @@ class DashboardOut(BaseModel):
     recent_cycles: List[Dict[str, Any]]
     pending_tasks: List[Dict[str, Any]]
 
+
+
+# ------------------ Score Draft ------------------
+class ScoreDraftCreate(BaseModel):
+    record_id: int
+    draft_type: str = Field(..., pattern=r'^(self|manager|peer)$')
+    draft_data: Dict[str, Any]
+
+class ScoreDraftOut(BaseModel):
+    id: int
+    record_id: int
+    draft_type: str
+    draft_data: Dict[str, Any]
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True

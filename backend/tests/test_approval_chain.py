@@ -105,7 +105,7 @@ class TestApprovalChain:
         assert resp.json()["status"] == "pending_interview"
 
     def test_pending_approvals_by_role(self, client: TestClient, manager_user, hr_user, employee_user, db_session: Session):
-        """Each role should only see records at their approval step"""
+        """Manager sees records at their step; HR sees all pending records"""
         dept = db_session.query(Department).filter(Department.code == "TECH").first()
         if not dept:
             dept = Department(name="技术部", code="TECH")
@@ -149,11 +149,11 @@ class TestApprovalChain:
         items = resp.json()
         assert any(i["record_id"] == record.id for i in items)
 
-        # HR should NOT see it (not at hr_head step yet)
+        # HR should also see it (HR sees all pending_approval records)
         resp = client.post("/auth/login", json={"username": "hr001", "password": "Hr001@123"})
         hr_token = resp.json()["access_token"]
 
         resp = client.get("/approvals/pending", headers={"Authorization": f"Bearer {hr_token}"})
         assert resp.status_code == 200
         items = resp.json()
-        assert not any(i["record_id"] == record.id for i in items)
+        assert any(i["record_id"] == record.id for i in items)

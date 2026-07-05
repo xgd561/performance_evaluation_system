@@ -118,11 +118,14 @@ class AssessmentRecord(Base):
     manager_draft_scores = Column(JSON, nullable=True)
     self_draft_scores = Column(JSON, nullable=True)
     peer_draft_scores = Column(JSON, nullable=True)
+    manager_submitted = Column(Boolean, default=False)
     interview_record = Column(JSON, nullable=True)
     appeal_record = Column(JSON, nullable=True)
     status = Column(String(50), default="pending_self")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    drafts = relationship("ScoreDraft", back_populates="record", cascade="all, delete-orphan")
 
 class ScoreDetail(Base):
     __tablename__ = "score_details"
@@ -219,6 +222,20 @@ class SystemConfig(Base):
     key = Column(String(100), unique=True, nullable=False)
     value = Column(Text, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ScoreDraft(Base):
+    __tablename__ = "score_drafts"
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    record_id = Column(Integer, ForeignKey("assessment_records.id"), nullable=False)
+    draft_type = Column(String(50), nullable=False)
+    draft_data = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("record_id", "draft_type", name="uq_record_draft_type"),)
+
+    record = relationship("AssessmentRecord", back_populates="drafts")
 
 
 class Notification(Base):

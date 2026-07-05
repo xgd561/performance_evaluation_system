@@ -1,7 +1,15 @@
 import request from './request'
 
-export function getPendingApprovals() {
-  return request.get('/approvals/pending')
+export function getPendingApprovals(params = {}) {
+  return request.get('/approvals/pending', { params })
+}
+
+export function getApprovalDetail(recordId) {
+  return request.get(`/approvals/${recordId}`)
+}
+
+export function getDepartmentDistribution(departmentId) {
+  return request.get('/approvals/department-distribution', { params: { department_id: departmentId } })
 }
 
 export function approveRecord(recordId, data) {

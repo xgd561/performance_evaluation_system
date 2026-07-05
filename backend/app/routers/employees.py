@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from typing import List, Optional, Dict, Any
 import io
 import json
@@ -163,12 +164,22 @@ def import_employees(
                     db.add(pos)
                     db.flush()
 
+            # Resolve manager by employee_no
+            manager_id = None
+            mgr_emp_no = str(row[4]).strip() if row[4] else None
+            if mgr_emp_no:
+                mgr = db.query(Employee).filter(Employee.employee_no == mgr_emp_no).first()
+                if mgr:
+                    manager_id = mgr.id
+
             # Upsert: check if employee exists
             emp = db.query(Employee).filter(Employee.employee_no == employee_no).first()
             if emp:
                 emp.name = name
                 emp.department_id = dept.id if dept else emp.department_id
                 emp.position_id = pos.id if pos else emp.position_id
+                if manager_id is not None:
+                    emp.manager_id = manager_id
                 success += 1
             else:
                 emp = Employee(
@@ -176,6 +187,7 @@ def import_employees(
                     name=name,
                     department_id=dept.id if dept else None,
                     position_id=pos.id if pos else None,
+                    manager_id=manager_id,
                 )
                 db.add(emp)
                 success += 1
@@ -298,6 +310,48 @@ def list_employees(
         "size": size,
         "items": result,
     }
+
+
+@router.get("/candidates")
+def get_peer_candidates(
+    exclude_id: int = None,
+    keyword: str = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("admin", "hr", "manager")),
+):
+    """P4-11: 查询候选协作人（排除被评分人自己、非在职员工）"""
+    query = db.query(Employee).filter(Employee.is_active == True)
+
+    if exclude_id:
+        query = query.filter(Employee.id != exclude_id)
+        # 优先返回其他部门员工
+        exclude_emp = db.query(Employee).filter(Employee.id == exclude_id).first()
+        if exclude_emp and exclude_emp.department_id:
+            query = query.filter(Employee.department_id != exclude_emp.department_id)
+
+    if keyword:
+        kw = f"%{keyword}%"
+        query = query.filter(
+            or_(
+                Employee.name.ilike(kw),
+                Employee.employee_no.ilike(kw),
+            )
+        )
+
+    results = []
+    for emp in query.all():
+        dept = db.query(Department).filter(Department.id == emp.department_id).first()
+        pos = db.query(Position).filter(Position.id == emp.position_id).first()
+        results.append({
+            "id": emp.id,
+            "name": emp.name,
+            "employee_no": emp.employee_no,
+            "department_id": emp.department_id,
+            "department_name": dept.name if dept else None,
+            "position_id": emp.position_id,
+            "position_name": pos.name if pos else None,
+        })
+    return results
 
 
 @router.get("/{employee_id}")

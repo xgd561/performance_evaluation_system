@@ -4,6 +4,14 @@ export function getPendingInterviews() {
   return request.get('/interviews/pending')
 }
 
+export function getManagerInterviewList(keyword = '') {
+  return request.get('/manager/interview-list', { params: { keyword } })
+}
+
+export function submitInterview(recordId, data) {
+  return request.post(`/assessment-records/${recordId}/interview`, data)
+}
+
 export function createInterview(recordId, data) {
   return request.post(`/interviews/${recordId}`, data)
 }

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
 from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -9,9 +9,11 @@ from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import (
     AssessmentRecord, Employee, Department, Position, User, ApprovalRecord,
-    AssessmentCycle, SystemConfig
+    AssessmentCycle, SystemConfig, PeerReviewTask
 )
 from app.services.operation_logger import log_operation
+from app.routers.employees import _is_in_subordinate_chain, get_all_dept_ids
+from app.utils.workflow_state_machine import WorkflowStateMachine
 
 DEFAULT_APPROVAL_CHAIN = ["direct_manager", "dept_head", "hr_head"]
 
@@ -58,6 +60,38 @@ def _can_approve_as_role(user, role: str, record: AssessmentRecord, db: Session)
         return user.role in ("hr", "admin")
     elif role == "admin":
         return user.role == "admin"
+    return False
+
+
+def _can_access_approval_detail(user, record: AssessmentRecord, db: Session):
+    """Check if user can access the approval detail for this record."""
+    if user.role in ("admin", "hr"):
+        return True
+
+    current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
+    if not current_employee:
+        return False
+
+    # Manager of this employee
+    if record.employee_id in [e.id for e in current_employee.subordinates]:
+        return True
+
+    # Current approver in chain
+    chain = _get_approval_chain(db)
+    next_role = _get_next_approver_role(db, record, chain)
+    if next_role and _can_approve_as_role(user, next_role, record, db):
+        return True
+
+    # Department head with access
+    if record.department_id:
+        record_dept = db.query(Department).filter(Department.id == record.department_id).first()
+        checked_dept_id = record_dept.id if record_dept else None
+        while checked_dept_id:
+            dept = db.query(Department).filter(Department.id == checked_dept_id).first()
+            if dept and dept.head_id == current_employee.id:
+                return True
+            checked_dept_id = dept.parent_id if dept else None
+
     return False
 
 
@@ -117,6 +151,10 @@ def update_chain_config(
 
 @router.get("/pending")
 def get_pending_approvals(
+    department_id: Optional[int] = Query(None),
+    is_abnormal: Optional[bool] = Query(None),
+    is_force_adjusted: Optional[bool] = Query(None),
+    step: Optional[int] = Query(None, ge=1, le=2),
     db: Session = Depends(get_db),
     user: User = Depends(require_role("manager", "hr", "admin")),
 ):
@@ -164,23 +202,55 @@ def get_pending_approvals(
             )
         elif role in ("hr_head", "hr") and user.role in ("hr", "admin"):
             conditions.append(
-                func.coalesce(step_counts.c.max_step, 0) == step_idx
+                AssessmentRecord.status == "pending_approval"
             )
         elif role == "admin" and user.role == "admin":
             conditions.append(
-                func.coalesce(step_counts.c.max_step, 0) == step_idx
+                AssessmentRecord.status == "pending_approval"
             )
 
     if conditions:
-        records = db.query(AssessmentRecord).outerjoin(
+        query = db.query(AssessmentRecord).outerjoin(
             step_counts, AssessmentRecord.id == step_counts.c.record_id
         ).filter(
             AssessmentRecord.status == "pending_approval"
         ).filter(
             or_(*conditions)
-        ).all()
+        )
     else:
-        records = []
+        return []
+
+    # P5-06: Additional query parameter filters
+    if department_id is not None:
+        query = query.filter(AssessmentRecord.department_id == department_id)
+
+    if is_abnormal is not None:
+        query = query.filter(AssessmentRecord.is_distribution_override == is_abnormal)
+
+    if is_force_adjusted is not None:
+        if is_force_adjusted:
+            query = query.filter(
+                and_(
+                    AssessmentRecord.original_grade != None,
+                    AssessmentRecord.grade != AssessmentRecord.original_grade,
+                )
+            )
+        else:
+            query = query.filter(
+                or_(
+                    AssessmentRecord.original_grade == None,
+                    AssessmentRecord.grade == AssessmentRecord.original_grade,
+                )
+            )
+
+    if step is not None:
+        # step=1 means first role in chain (step_idx=0 in DB)
+        # step=2 means second role in chain (step_idx=1 in DB)
+        target_step_idx = step - 1
+        if target_step_idx < len(chain):
+            query = query.filter(func.coalesce(step_counts.c.max_step, 0) == target_step_idx)
+
+    records = query.all()
 
     # 组装返回数据（与原有逻辑保持一致）
     result = []
@@ -196,7 +266,7 @@ def get_pending_approvals(
         grade = r.grade if r.grade else None
 
         # 异常标记：强制调整
-        is_abnormal = r.is_distribution_override
+        is_abnormal_flag = r.is_distribution_override
         # 异常标记：上级评分与自评分差异超过20分
         score_diff_alert = False
         if manager_scores and self_scores:
@@ -208,6 +278,12 @@ def get_pending_approvals(
                     break
 
         next_role = _get_next_approver_role(db, r, chain)
+        existing_approvals = db.query(ApprovalRecord).filter(
+            ApprovalRecord.record_id == r.id,
+            ApprovalRecord.approval_type == "normal",
+            ApprovalRecord.action == "approved",
+        ).order_by(ApprovalRecord.step_index.desc()).first()
+        step_index = (existing_approvals.step_index if existing_approvals else 0) + 1
 
         result.append({
             "record_id": r.id,
@@ -223,14 +299,120 @@ def get_pending_approvals(
             "manager_scores": manager_scores,
             "total_score": total_score,
             "grade": grade,
-            "is_abnormal": is_abnormal,
+            "is_abnormal": is_abnormal_flag,
             "score_diff_alert": score_diff_alert,
             "manager_comment": r.manager_comment,
+            "step_index": step_index,
             "next_approver_role": next_role,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         })
 
     return result
+
+
+@router.get("/{record_id}")
+def get_approval_detail(
+    record_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("manager", "hr", "admin")),
+):
+    """P5-07: 获取审批详情（包含评分、历史、审批链）"""
+    record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    if not _can_access_approval_detail(user, record, db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看此记录")
+
+    emp = db.query(Employee).filter(Employee.id == record.employee_id).first()
+    dept = db.query(Department).filter(Department.id == record.department_id).first()
+    pos = db.query(Position).filter(Position.id == record.position_id).first()
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == record.cycle_id).first()
+
+    self_scores = json.loads(record.self_scores) if record.self_scores else {}
+    manager_scores = json.loads(record.manager_scores) if record.manager_scores else {}
+    peer_scores = json.loads(record.peer_scores) if record.peer_scores else {}
+
+    # Peer comments from PeerReviewTask
+    peer_tasks = db.query(PeerReviewTask).filter(
+        PeerReviewTask.record_id == record_id,
+        PeerReviewTask.status == "completed",
+    ).all()
+    peer_comments = []
+    for task in peer_tasks:
+        reviewer = db.query(Employee).filter(Employee.id == task.reviewer_id).first()
+        peer_comments.append({
+            "reviewer_name": reviewer.name if reviewer else None,
+            "ability_score": str(task.ability_score) if task.ability_score else None,
+            "comment": task.comment,
+        })
+
+    # History: last 3 cycles excluding current, ordered by cycle start date desc
+    history = []
+    if emp:
+        past_records = db.query(AssessmentRecord).join(AssessmentCycle).filter(
+            AssessmentRecord.employee_id == emp.id,
+            AssessmentRecord.id != record_id,
+        ).order_by(AssessmentCycle.start_date.desc()).limit(3).all()
+        for pr in past_records:
+            pr_cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == pr.cycle_id).first()
+            history.append({
+                "cycle_name": pr_cycle.name if pr_cycle else None,
+                "total_score": str(pr.total_score) if pr.total_score else None,
+                "grade": pr.grade,
+            })
+
+    # Approval history
+    approval_history = []
+    approvals = db.query(ApprovalRecord).filter(
+        ApprovalRecord.record_id == record_id,
+    ).order_by(ApprovalRecord.step_index.asc()).all()
+    for a in approvals:
+        approver = db.query(Employee).filter(Employee.id == a.approver_id).first()
+        approval_history.append({
+            "approver_name": approver.name if approver else None,
+            "action": a.action,
+            "comment": a.comment,
+            "step_index": a.step_index,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        })
+
+    # Score diff alert
+    score_diff_alert = False
+    if manager_scores and self_scores:
+        for dim in ["performance", "ability", "attitude"]:
+            m_score = manager_scores.get(dim)
+            s_score = self_scores.get(dim)
+            if m_score is not None and s_score is not None and abs(float(m_score) - float(s_score)) > 20:
+                score_diff_alert = True
+                break
+
+    return {
+        "record_id": record.id,
+        "employee_id": record.employee_id,
+        "employee_name": emp.name if emp else None,
+        "employee_no": emp.employee_no if emp else None,
+        "department_name": dept.name if dept else None,
+        "position_name": pos.name if pos else None,
+        "cycle_name": cycle.name if cycle else None,
+        "status": record.status,
+        "self_scores": self_scores,
+        "manager_scores": manager_scores,
+        "manager_comment": record.manager_comment,
+        "peer_scores": peer_scores,
+        "peer_comments": peer_comments,
+        "weighted_performance": str(record.weighted_performance) if record.weighted_performance else None,
+        "weighted_ability": str(record.weighted_ability) if record.weighted_ability else None,
+        "weighted_attitude": str(record.weighted_attitude) if record.weighted_attitude else None,
+        "total_score": str(record.total_score) if record.total_score else None,
+        "grade": record.grade,
+        "original_grade": record.original_grade,
+        "is_distribution_override": record.is_distribution_override,
+        "is_abnormal": record.is_distribution_override,
+        "score_diff_alert": score_diff_alert,
+        "history": history,
+        "approval_history": approval_history,
+    }
 
 
 @router.post("/{record_id}/approve")
@@ -264,6 +446,20 @@ def approve_record(
     ).order_by(ApprovalRecord.step_index.desc()).first()
     current_step = existing.step_index if existing else 0
 
+    # Duplicate check: same approver at same step
+    dup = db.query(ApprovalRecord).filter(
+        ApprovalRecord.record_id == record_id,
+        ApprovalRecord.approver_id == user.employee_id,
+        ApprovalRecord.step_index == current_step + 1,
+        ApprovalRecord.action == "approved",
+    ).first()
+    if dup:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该记录已审批通过，请勿重复操作")
+
+    # Comment validation
+    if comment is not None and len(comment) < 10:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="comment 必须至少 10 个字符")
+
     # Create approval record
     approval = ApprovalRecord(
         record_id=record_id,
@@ -277,11 +473,16 @@ def approve_record(
 
     old_status = record.status
 
-    # Check if there are more steps
-    if current_step + 1 < len(chain):
-        record.status = "pending_approval"
-    else:
-        record.status = "pending_interview"
+    # Use WorkflowStateMachine to determine new status
+    action_name = "approve_step1" if current_step + 1 < len(chain) else "approve_step2"
+    new_status = WorkflowStateMachine.transition(
+        current_state="pending_approval",
+        action=action_name,
+        db=db,
+        user_id=user.id,
+        target_id=record_id,
+    )
+    record.status = new_status
 
     db.commit()
 
@@ -328,6 +529,19 @@ def reject_record(
     ).order_by(ApprovalRecord.step_index.desc()).first()
     current_step = existing.step_index if existing else 0
 
+    # Duplicate check
+    dup = db.query(ApprovalRecord).filter(
+        ApprovalRecord.record_id == record_id,
+        ApprovalRecord.approver_id == user.employee_id,
+        ApprovalRecord.action == "rejected",
+    ).first()
+    if dup:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该记录已驳回，请勿重复操作")
+
+    # Reason validation
+    if len(reason) < 10:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="reason 必须至少 10 个字符")
+
     approval = ApprovalRecord(
         record_id=record_id,
         approver_id=user.employee_id,
@@ -339,7 +553,17 @@ def reject_record(
     db.add(approval)
 
     old_status = record.status
-    record.status = "pending_manager"
+
+    # Use WorkflowStateMachine to determine new status (should stay pending_approval)
+    new_status = WorkflowStateMachine.transition(
+        current_state="pending_approval",
+        action="reject",
+        db=db,
+        user_id=user.id,
+        target_id=record_id,
+    )
+    record.status = new_status
+
     db.commit()
 
     log_operation(
@@ -385,6 +609,19 @@ def rollback_record(
     ).order_by(ApprovalRecord.step_index.desc()).first()
     current_step = existing.step_index if existing else 0
 
+    # Duplicate check
+    dup = db.query(ApprovalRecord).filter(
+        ApprovalRecord.record_id == record_id,
+        ApprovalRecord.approver_id == user.employee_id,
+        ApprovalRecord.action == "rollback",
+    ).first()
+    if dup:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该记录已打回，请勿重复操作")
+
+    # Reason validation
+    if len(reason) < 10:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="reason 必须至少 10 个字符")
+
     approval = ApprovalRecord(
         record_id=record_id,
         approver_id=user.employee_id,
@@ -404,10 +641,9 @@ def rollback_record(
         "status": record.status,
     }
 
-    # 清除评分数据
-    record.self_scores = None
+    # 清除评分数据（仅清除经理相关数据，保留自评和协作评分）
     record.manager_scores = None
-    record.peer_scores = None
+    record.manager_draft_scores = None
     record.weighted_performance = None
     record.weighted_ability = None
     record.weighted_attitude = None
@@ -415,7 +651,16 @@ def rollback_record(
     record.grade = None
     record.original_grade = None
     record.manager_comment = None
-    record.status = "pending_self"
+
+    # Use WorkflowStateMachine to determine new status (should be pending_manager)
+    new_status = WorkflowStateMachine.transition(
+        current_state="pending_approval",
+        action="rollback",
+        db=db,
+        user_id=user.id,
+        target_id=record_id,
+    )
+    record.status = new_status
 
     db.commit()
 
@@ -429,7 +674,7 @@ def rollback_record(
         new_value={"status": record.status},
     )
 
-    return {"message": "已打回重评，考核回到自评阶段", "record_id": record_id}
+    return {"message": "已打回重评，考核回到上级评分阶段", "record_id": record_id}
 
 
 @router.get("/history")

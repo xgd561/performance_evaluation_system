@@ -19,6 +19,6 @@ export function exportCycleReportExcel(cycleId) {
   })
 }
 
-export function getEmployeeTrend(employeeId) {
-  return request.get(`/reports/employee/${employeeId}/trend`)
+export function getEmployeeTrend(employeeId, params = {}) {
+  return request.get(`/reports/employee/${employeeId}/trend`, { params })
 }

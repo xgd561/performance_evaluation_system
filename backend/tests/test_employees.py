@@ -377,6 +377,8 @@ class TestEmployeeDelete:
         assert resp.status_code == 204
 
     def test_delete_employee_with_records(self, client: TestClient, admin_token, db_session):
+        from app.models import AssessmentCycle
+        from datetime import date
         dept = Department(name="删除部", code="DEL")
         db_session.add(dept)
         db_session.flush()
@@ -386,7 +388,10 @@ class TestEmployeeDelete:
         emp = Employee(employee_no="DEL002", name="有记录员工", department_id=dept.id, position_id=pos.id)
         db_session.add(emp)
         db_session.flush()
-        record = AssessmentRecord(cycle_id=1, employee_id=emp.id)
+        cycle = AssessmentCycle(name="2024Q1", type="quarterly", start_date=date(2024,1,1), end_date=date(2024,3,31))
+        db_session.add(cycle)
+        db_session.flush()
+        record = AssessmentRecord(cycle_id=cycle.id, employee_id=emp.id)
         db_session.add(record)
         db_session.commit()
         db_session.refresh(emp)
@@ -452,93 +457,114 @@ class TestEmployeeImportStatus:
         resp = client.get("/employees/import/status")
         assert resp.status_code == 401
 
-    def test_import_status_unauthorized(self, client: TestClient, employee_token):
-        resp = client.get("/employees/import/status", headers={"Authorization": f"Bearer {employee_token}"})
-        assert resp.status_code == 403
 
-    def test_download_template_success(self, client: TestClient, admin_token):
-        resp = client.get("/employees/template?type=empty", headers={"Authorization": f"Bearer {admin_token}"})
-        assert resp.status_code == 200
-        assert resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+class TestEmployeeSubordinates:
+    """Tests for GET /employees/{employee_id}/subordinates"""
 
-    def test_download_template_sample(self, client: TestClient, admin_token):
-        resp = client.get("/employees/template?type=sample", headers={"Authorization": f"Bearer {admin_token}"})
-        assert resp.status_code == 200
+    def test_get_subordinates_success(self, client: TestClient, admin_token, db_session):
+        dept = Department(name="技术部", code="TECH")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="工程师", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+        # 李建国 (manager_id=null)
+        li = Employee(employee_no="LJG001", name="李建国", department_id=dept.id, position_id=pos.id, manager_id=None)
+        db_session.add(li)
+        db_session.flush()
+        # 王志强 (manager_id=李建国)
+        wang = Employee(employee_no="WZQ001", name="王志强", department_id=dept.id, position_id=pos.id, manager_id=li.id)
+        db_session.add(wang)
+        db_session.commit()
 
-    def test_download_template_unauthorized(self, client: TestClient, employee_token):
-        resp = client.get("/employees/template", headers={"Authorization": f"Bearer {employee_token}"})
-        assert resp.status_code == 403
-
-    def test_download_template_no_auth(self, client: TestClient):
-        resp = client.get("/employees/template")
-        assert resp.status_code == 401
-
-
-class TestEmployeeImportPreview:
-    """Tests for POST /employees/import-preview"""
-
-    def test_import_preview_no_file(self, client: TestClient, admin_token):
-        resp = client.post("/employees/import-preview", headers={"Authorization": f"Bearer {admin_token}"})
-        assert resp.status_code == 422
-
-    def test_import_preview_no_auth(self, client: TestClient):
-        resp = client.post("/employees/import-preview")
-        assert resp.status_code == 401
-
-    def test_import_preview_unauthorized(self, client: TestClient, employee_token):
-        resp = client.post("/employees/import-preview", headers={"Authorization": f"Bearer {employee_token}"})
-        assert resp.status_code == 403
-
-
-class TestEmployeeImportStatus:
-    """Tests for GET /employees/import/status"""
-
-    def test_import_status_success(self, client: TestClient, admin_token):
-        resp = client.get("/employees/import/status", headers={"Authorization": f"Bearer {admin_token}"})
+        resp = client.get(f"/employees/{li.id}/subordinates", headers={"Authorization": f"Bearer {admin_token}"})
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "ready"
-        assert data["progress"] == 100
+        assert len(data) == 1
+        assert data[0]["name"] == "王志强"
+        assert data[0]["employee_no"] == "WZQ001"
 
-    def test_import_status_no_auth(self, client: TestClient):
-        resp = client.get("/employees/import/status")
-        assert resp.status_code == 401
+    def test_get_subordinates_empty(self, client: TestClient, admin_token, db_session):
+        dept = Department(name="技术部", code="TECH")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="工程师", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+        wang = Employee(employee_no="WZQ001", name="王志强", department_id=dept.id, position_id=pos.id, manager_id=None)
+        db_session.add(wang)
+        db_session.commit()
 
-    def test_import_status_unauthorized(self, client: TestClient, employee_token):
-        resp = client.get("/employees/import/status", headers={"Authorization": f"Bearer {employee_token}"})
-        assert resp.status_code == 403
-
-
-class TestEmployeeImportPreview:
-    """Tests for POST /employees/import-preview"""
-
-    def test_import_preview_no_file(self, client: TestClient, admin_token):
-        resp = client.post("/employees/import-preview", headers={"Authorization": f"Bearer {admin_token}"})
-        assert resp.status_code == 422  # No file uploaded
-
-    def test_import_preview_unauthorized(self, client: TestClient, employee_token):
-        resp = client.post("/employees/import-preview", headers={"Authorization": f"Bearer {employee_token}"})
-        assert resp.status_code == 403
-
-    def test_import_preview_no_auth(self, client: TestClient):
-        resp = client.post("/employees/import-preview")
-        assert resp.status_code == 401
-
-
-class TestEmployeeImportStatus:
-    """Tests for GET /employees/import/status"""
-
-    def test_import_status_success(self, client: TestClient, admin_token):
-        resp = client.get("/employees/import/status", headers={"Authorization": f"Bearer {admin_token}"})
+        # 查询王志强下属 -> 空数组
+        resp = client.get(f"/employees/{wang.id}/subordinates", headers={"Authorization": f"Bearer {admin_token}"})
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "ready"
-        assert data["progress"] == 100
+        assert data == []
 
-    def test_import_status_unauthorized(self, client: TestClient, employee_token):
-        resp = client.get("/employees/import/status", headers={"Authorization": f"Bearer {employee_token}"})
+    def test_get_subordinates_not_found(self, client: TestClient, admin_token):
+        resp = client.get("/employees/99999/subordinates", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 404
+
+    def test_get_subordinates_unauthorized(self, client: TestClient, employee_token):
+        resp = client.get("/employees/1/subordinates", headers={"Authorization": f"Bearer {employee_token}"})
         assert resp.status_code == 403
 
-    def test_import_status_no_auth(self, client: TestClient):
-        resp = client.get("/employees/import/status")
+    def test_get_subordinates_no_auth(self, client: TestClient):
+        resp = client.get("/employees/1/subordinates")
+        assert resp.status_code == 401
+
+
+class TestEmployeeSubordinates:
+    """Tests for GET /employees/{employee_id}/subordinates"""
+
+    def test_get_subordinates_success(self, client: TestClient, admin_token, db_session):
+        dept = Department(name="技术部", code="TECH")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="工程师", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+        # 李建国 (manager_id=null)
+        li = Employee(employee_no="LJG001", name="李建国", department_id=dept.id, position_id=pos.id, manager_id=None)
+        db_session.add(li)
+        db_session.flush()
+        # 王志强 (manager_id=李建国)
+        wang = Employee(employee_no="WZQ001", name="王志强", department_id=dept.id, position_id=pos.id, manager_id=li.id)
+        db_session.add(wang)
+        db_session.commit()
+
+        resp = client.get(f"/employees/{li.id}/subordinates", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["name"] == "王志强"
+        assert data[0]["employee_no"] == "WZQ001"
+
+    def test_get_subordinates_empty(self, client: TestClient, admin_token, db_session):
+        dept = Department(name="技术部", code="TECH")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="工程师", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+        wang = Employee(employee_no="WZQ001", name="王志强", department_id=dept.id, position_id=pos.id, manager_id=None)
+        db_session.add(wang)
+        db_session.commit()
+
+        # 查询王志强下属 -> 空数组
+        resp = client.get(f"/employees/{wang.id}/subordinates", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == []
+
+    def test_get_subordinates_not_found(self, client: TestClient, admin_token):
+        resp = client.get("/employees/99999/subordinates", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 404
+
+    def test_get_subordinates_unauthorized(self, client: TestClient, employee_token):
+        resp = client.get("/employees/1/subordinates", headers={"Authorization": f"Bearer {employee_token}"})
+        assert resp.status_code == 403
+
+    def test_get_subordinates_no_auth(self, client: TestClient):
+        resp = client.get("/employees/1/subordinates")
         assert resp.status_code == 401

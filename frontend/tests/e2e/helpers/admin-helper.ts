@@ -12,8 +12,37 @@ export async function adminLogin(page: Page) {
 }
 
 /**
- * 生成唯一的测试标识（用于工号、名称等，避免冲突）
+ * Manager 登录辅助函数
  */
+export async function managerLogin(page: Page) {
+  await page.goto('/login')
+  await page.getByPlaceholder('用户名').fill('mgr001')
+  await page.getByPlaceholder('密码').fill('Mgr001@123')
+  await page.getByRole('button', { name: '登录' }).click()
+  await page.waitForURL('**/dashboard')
+}
+/**
+ * HR 登录辅助函数
+ */
+export async function hrLogin(page: Page) {
+  await page.goto('/login')
+  await page.getByPlaceholder('用户名').fill('hr001')
+  await page.getByPlaceholder('密码').fill('Hr001@123')
+  await page.getByRole('button', { name: '登录' }).click()
+  await page.waitForURL('**/dashboard')
+}
+
+/**
+ * 员工登录辅助函数
+ */
+export async function employeeLogin(page: Page) {
+  await page.goto('/login')
+  await page.getByPlaceholder('用户名').fill('emp001')
+  await page.getByPlaceholder('密码').fill('Emp001@123')
+  await page.getByRole('button', { name: '登录' }).click()
+  await page.waitForURL('**/dashboard')
+}
+
 export function uniqueId() {
   return `e2e-${Date.now()}-${Math.floor(Math.random() * 1000)}`
 }

@@ -3,13 +3,41 @@
     <h2>考核周期管理</h2>
     <el-card class="mt-20">
       <div class="toolbar">
+        <div class="filter-bar">
+          <el-select v-model="filter.status" placeholder="状态" clearable style="width: 120px">
+            <el-option label="未开始" value="not_started" />
+            <el-option label="自评中" value="pending_self" />
+            <el-option label="上级评中" value="pending_manager" />
+            <el-option label="协作评中" value="pending_peer" />
+            <el-option label="汇总中" value="pending_summary" />
+            <el-option label="审批中" value="pending_approval" />
+            <el-option label="待发布" value="pending_interview" />
+            <el-option label="已发布" value="published" />
+            <el-option label="已归档" value="archived" />
+          </el-select>
+          <el-select v-model="filter.type" placeholder="类型" clearable style="width: 120px">
+            <el-option label="月度" value="monthly" />
+            <el-option label="季度" value="quarterly" />
+            <el-option label="年度" value="annual" />
+          </el-select>
+          <el-date-picker
+            v-model="filter.dateRange"
+            type="daterange"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            style="width: 260px"
+          />
+          <el-button type="primary" @click="handleSearch">查询</el-button>
+          <el-button @click="handleReset">重置</el-button>
+        </div>
         <el-button type="primary" @click="openDialog">新增周期</el-button>
       </div>
       <el-table :data="cycles" style="width: 100%" v-loading="loading">
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="type" label="类型" width="120">
           <template #default="scope">
-            <el-tag>{{ scope.row.type }}</el-tag>
+            <el-tag>{{ typeText(scope.row.type) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="start_date" label="开始日期" width="120" />
@@ -29,6 +57,11 @@
             <span>{{ scope.row.peer_due_date || '—' }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="考核对象" width="120">
+          <template #default="scope">
+            <el-button size="small" text type="primary" @click="viewDetail(scope.row)">查看</el-button>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="120">
           <template #default="scope">
             <el-tag :type="statusType(scope.row.status)">{{ statusText(scope.row.status) }}</el-tag>
@@ -36,15 +69,33 @@
         </el-table-column>
         <el-table-column label="操作" width="280">
           <template #default="scope">
-            <el-button size="small" v-if="scope.row.status === 'not_started'" @click="editCycle(scope.row)">编辑</el-button>
-            <el-button size="small" type="success" v-if="scope.row.status === 'not_started'" @click="openLaunchDialog(scope.row)">发起</el-button>
-            <el-button size="small" type="primary" v-if="scope.row.status !== 'archived'" @click="openPeerDialog(scope.row)">协作人</el-button>
-            <el-button size="small" type="warning" v-if="canPublish(scope.row.status)" @click="handlePublish(scope.row)">发布结果</el-button>
-            <el-button size="small" @click="viewProgress(scope.row)">进度</el-button>
-            <el-button size="small" type="danger" v-if="scope.row.status === 'not_started'" @click="removeCycle(scope.row)">删除</el-button>
+            <template v-if="scope.row.status === 'not_started'">
+              <el-button size="small" @click="editCycle(scope.row)">编辑</el-button>
+              <el-button size="small" type="success" @click="openLaunchDialog(scope.row)">启动</el-button>
+              <el-button size="small" type="danger" @click="removeCycle(scope.row)">删除</el-button>
+            </template>
+            <template v-else-if="scope.row.status === 'published' || scope.row.status === 'archived'">
+              <el-button size="small" @click="viewDetail(scope.row)">查看详情</el-button>
+            </template>
+            <template v-else>
+              <el-button size="small" type="primary" @click="openPeerDialog(scope.row)">协作人</el-button>
+              <el-button size="small" type="warning" v-if="canPublish(scope.row.status)" @click="handlePublish(scope.row)">发布结果</el-button>
+              <el-button size="small" @click="viewProgress(scope.row)">进度</el-button>
+            </template>
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination
+        v-if="pagination.total > 0"
+        v-model:current-page="pagination.page"
+        v-model:page-size="pagination.size"
+        :total="pagination.total"
+        :page-sizes="[10, 20, 50]"
+        layout="total, sizes, prev, pager, next"
+        class="pagination-bar"
+        @size-change="handleSizeChange"
+        @current-change="handlePageChange"
+      />
     </el-card>
 
     <!-- Add/Edit Dialog -->
@@ -151,13 +202,38 @@
         </el-table>
       </div>
     </el-dialog>
+    <!-- Detail Dialog -->
+    <el-dialog v-model="detailDialogVisible" title="考核周期详情" width="600px">
+      <div v-if="detailCycle">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="名称">{{ detailCycle.name }}</el-descriptions-item>
+          <el-descriptions-item label="类型">{{ typeText(detailCycle.type) }}</el-descriptions-item>
+          <el-descriptions-item label="开始日期">{{ detailCycle.start_date }}</el-descriptions-item>
+          <el-descriptions-item label="结束日期">{{ detailCycle.end_date }}</el-descriptions-item>
+          <el-descriptions-item label="自评截止">{{ detailCycle.self_due_date || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="上级评截止">{{ detailCycle.manager_due_date || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="协作评截止">{{ detailCycle.peer_due_date || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="statusType(detailCycle.status)">{{ statusText(detailCycle.status) }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="协作评开关" :span="2">{{ detailCycle.peer_review_enabled ? '开启' : '关闭' }}</el-descriptions-item>
+          <el-descriptions-item label="考核对象部门" :span="2">
+            <div v-if="detailCycle.departments && detailCycle.departments.length">
+              <el-tag v-for="d in detailCycle.departments" :key="d.id" class="mr-4">{{ d.name }}</el-tag>
+            </div>
+            <span v-else>—</span>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+    </el-dialog>
+
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { listCycles, createCycle, updateCycle, deleteCycle, launchCycle, getCycleProgress, publishCycle, listCycleEmployees } from '@/api/cycles'
+import { listCycles, createCycle, updateCycle, deleteCycle, launchCycle, getCycleProgress, publishCycle, listCycleEmployees, getCycleDetail } from '@/api/cycles'
 import { listEmployees } from '@/api/employees'
 import { listPeersByCycle, assignPeer, removePeer } from '@/api/peers'
 
@@ -201,6 +277,22 @@ const cycleEmployees = ref([])
 const peerRelations = ref([])
 const peerEmployeeOptions = ref([])
 
+// 筛选与分页
+const filter = reactive({
+  status: '',
+  type: '',
+  dateRange: [],
+})
+const pagination = reactive({
+  page: 1,
+  size: 10,
+  total: 0,
+})
+
+// 详情弹窗
+const detailDialogVisible = ref(false)
+const detailCycle = ref(null)
+
 function statusText(status) {
   const map = {
     not_started: '未开始',
@@ -214,6 +306,15 @@ function statusText(status) {
     archived: '已归档',
   }
   return map[status] || status
+}
+
+function typeText(type) {
+  const map = {
+    monthly: '月度',
+    quarterly: '季度',
+    annual: '年度',
+  }
+  return map[type] || type
 }
 
 function statusType(status) {
@@ -247,19 +348,66 @@ async function handlePublish(row) {
 async function loadData() {
   loading.value = true
   try {
-    const res = await listCycles()
-    console.log('[DEBUG] listCycles response:', res)
-    if (res && res.length > 0) {
-      console.log('[DEBUG] first item fields:', Object.keys(res[0]))
-      console.log('[DEBUG] first item self_due_date:', res[0].self_due_date)
-      console.log('[DEBUG] first item manager_due_date:', res[0].manager_due_date)
-      console.log('[DEBUG] first item peer_due_date:', res[0].peer_due_date)
+    const params = {
+      page: pagination.page,
+      size: pagination.size,
     }
-    cycles.value = res || []
+    if (filter.status) params.status = filter.status
+    if (filter.type) params.type = filter.type
+    if (filter.dateRange && filter.dateRange.length === 2) {
+      params.start_date = filter.dateRange[0]
+      params.end_date = filter.dateRange[1]
+    }
+    const res = await listCycles(params)
+    if (Array.isArray(res)) {
+      cycles.value = res
+      pagination.total = res.length
+    } else if (res && Array.isArray(res.items)) {
+      cycles.value = res.items
+      pagination.total = res.total || 0
+    } else {
+      cycles.value = []
+      pagination.total = 0
+    }
   } catch (e) {
     console.error(e)
   } finally {
     loading.value = false
+  }
+}
+
+function handleSearch() {
+  pagination.page = 1
+  loadData()
+}
+
+function handleReset() {
+  filter.status = ''
+  filter.type = ''
+  filter.dateRange = []
+  pagination.page = 1
+  loadData()
+}
+
+function handleSizeChange(val) {
+  pagination.size = val
+  pagination.page = 1
+  loadData()
+}
+
+function handlePageChange(val) {
+  pagination.page = val
+  loadData()
+}
+
+async function viewDetail(row) {
+  try {
+    const res = await getCycleDetail(row.id)
+    detailCycle.value = res
+    detailDialogVisible.value = true
+  } catch (e) {
+    console.error(e)
+    ElMessage.error(e?.response?.data?.message || '加载详情失败')
   }
 }
 
@@ -282,7 +430,6 @@ function editCycle(row) {
     peer_due_date: row.peer_due_date || '',
     dateRange: [row.start_date, row.end_date],
   })
-  console.log('[DEBUG] editCycle form:', JSON.parse(JSON.stringify(form)))
   dialogVisible.value = true
 }
 
@@ -302,12 +449,10 @@ async function submitForm() {
     }
     console.log('[DEBUG] submitForm payload:', payload)
     if (isEdit.value) {
-      const updateRes = await updateCycle(form.id, payload)
-      console.log('[DEBUG] updateCycle response:', updateRes)
+      await updateCycle(form.id, payload)
       ElMessage.success('更新成功')
     } else {
-      const createRes = await createCycle(payload)
-      console.log('[DEBUG] createCycle response:', createRes)
+      await createCycle(payload)
       ElMessage.success('创建成功')
     }
     dialogVisible.value = false
@@ -445,6 +590,19 @@ onMounted(() => {
 }
 .toolbar {
   margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.filter-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.pagination-bar {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
 }
 .loading-wrap {
   padding: 24px;
@@ -469,5 +627,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.mr-4 {
+  margin-right: 4px;
 }
 </style>

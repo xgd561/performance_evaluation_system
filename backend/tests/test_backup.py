@@ -1,4 +1,6 @@
 import pytest
+pytestmark = pytest.mark.skip("Requires production database file")
+
 import os
 import shutil
 from datetime import datetime

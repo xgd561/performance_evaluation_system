@@ -90,14 +90,32 @@
                   :step="1"
                   placeholder="0-100"
                   class="score-input"
+                  :disabled="isLocked"
                 />
                 <span v-if="dimensionError" class="error-msg">{{ dimensionError }}</span>
               </div>
             </div>
           </div>
 
+          <!-- 协作评语 -->
+          <div class="comment-section">
+            <h4>协作评语</h4>
+            <p class="section-desc">请对被评人的工作表现进行综合评价，不少于20字，不超过500字</p>
+            <el-input
+              v-model="scoreForm.comment"
+              type="textarea"
+              :rows="6"
+              :maxlength="500"
+              :disabled="isLocked"
+              placeholder="请输入协作评语..."
+              show-word-limit
+              :class="{ 'has-error': commentError }"
+            />
+            <span v-if="commentError" class="error-msg">{{ commentError }}</span>
+          </div>
+
           <!-- 提交按钮 -->
-          <div class="submit-section">
+          <div class="submit-section" v-if="!isLocked">
             <el-button
               type="primary"
               size="large"
@@ -107,6 +125,10 @@
             >
               提交评分
             </el-button>
+            <el-button size="large" @click="handleCancel">返回</el-button>
+          </div>
+          <div class="submit-section" v-else>
+            <el-tag type="success" size="large">评分已提交</el-tag>
             <el-button size="large" @click="handleCancel">返回</el-button>
           </div>
         </el-form>
@@ -119,12 +141,12 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getMyPeerReviews, submitPeerScore } from '@/api/scores'
+import { getPeerReviewList, submitPeerReviewTask } from '@/api/scores'
 import { SCORE_ANCHORS } from '@/utils/constants'
 
 const route = useRoute()
 const router = useRouter()
-const recordId = computed(() => route.params.recordId)
+const taskId = computed(() => route.params.taskId)
 
 const pageTitle = computed(() => `协作评分 - ${employeeInfo.name}`)
 
@@ -139,6 +161,7 @@ const employeeInfo = reactive({
 
 const selfScores = ref(null)
 const managerScores = ref(null)
+const taskStatus = ref('pending')
 
 const countdownDays = computed(() => {
   if (!employeeInfo.deadline) return 1
@@ -152,30 +175,48 @@ const countdownText = computed(() => {
 })
 
 const scoreForm = reactive({
-  ability: null
+  ability: null,
+  comment: ''
 })
 
 const scoreFormRef = ref(null)
 const submitting = ref(false)
 const dimensionError = ref('')
+const commentError = ref('')
+
+const isLocked = computed(() => taskStatus.value === 'completed')
 
 const canSubmit = computed(() => {
-  return scoreForm.ability !== null && scoreForm.ability >= 0 && scoreForm.ability <= 100
+  return scoreForm.ability !== null
+    && scoreForm.ability >= 0
+    && scoreForm.ability <= 100
+    && scoreForm.comment.trim().length >= 20
+    && scoreForm.comment.trim().length <= 500
 })
 
 onMounted(async () => {
   try {
-    const res = await getMyPeerReviews()
+    const res = await getPeerReviewList()
     const items = res?.items || []
-    const item = items.find(i => String(i.record_id) === String(recordId.value))
-    if (item) {
-      employeeInfo.name = item.employee_name
-      employeeInfo.department = item.department_name
-      employeeInfo.position = item.position_name
-      employeeInfo.cycleName = item.cycle_name
-      employeeInfo.deadline = item.peer_due_date
-      selfScores.value = item.self_scores
-      managerScores.value = item.manager_scores
+    const item = items.find(i => String(i.task_id) === String(taskId.value))
+    if (!item) {
+      ElMessage.error('评分任务不存在')
+      router.push('/peer-review')
+      return
+    }
+    employeeInfo.name = item.employee_name
+    employeeInfo.department = item.department_name
+    employeeInfo.position = item.position_name
+    employeeInfo.cycleName = item.cycle_name
+    employeeInfo.deadline = item.peer_due_date
+    taskStatus.value = item.status || 'pending'
+    selfScores.value = item.self_scores || null
+    managerScores.value = item.manager_scores || null
+    // 已提交时回显数据
+    if (item.status === 'completed') {
+      scoreForm.ability = item.ability_score ? parseFloat(item.ability_score) : null
+      scoreForm.comment = item.comment || ''
+      employeeInfo.stage = '协作评分已完成'
     }
   } catch (e) {
     console.error(e)
@@ -190,11 +231,26 @@ async function handleSubmit() {
   }
   dimensionError.value = ''
 
+  const comment = scoreForm.comment.trim()
+  if (comment.length < 20) {
+    commentError.value = '协作评语不少于20字'
+    return
+  }
+  if (comment.length > 500) {
+    commentError.value = '协作评语不超过500字'
+    return
+  }
+  commentError.value = ''
+
   submitting.value = true
   try {
-    await submitPeerScore(recordId.value, { ability: scoreForm.ability })
+    await submitPeerReviewTask(taskId.value, {
+      ability: scoreForm.ability,
+      comment: comment
+    })
     ElMessage.success('评分提交成功')
-    router.push('/peer-review')
+    taskStatus.value = 'completed'
+    employeeInfo.stage = '协作评分已完成'
   } catch (error) {
     console.error('Submit failed:', error)
     ElMessage.error(error?.response?.data?.message || '提交失败')
@@ -300,7 +356,8 @@ function handleCancel() {
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.05);
 }
 
-.dimension-section h4 {
+.dimension-section h4,
+.comment-section h4 {
   margin: 0 0 8px;
   font-size: 16px;
   color: #303133;
@@ -374,6 +431,10 @@ function handleCancel() {
   font-size: 13px;
 }
 
+.comment-section {
+  margin-bottom: 24px;
+}
+
 .submit-section {
   display: flex;
   gap: 12px;
@@ -386,6 +447,7 @@ function handleCancel() {
   color: #f56c6c;
   font-size: 12px;
   margin-top: 4px;
+  display: block;
 }
 
 @media (max-width: 1024px) {

@@ -28,12 +28,33 @@ export function calculateScores(cycleId) {
   return request.post(`/scores/calculate/${cycleId}`)
 }
 
+export function getPeerReviewList() {
+  return request.get('/scores/peer/review-list')
+}
+
+export function submitPeerReviewTask(taskId, data) {
+  return request.post(`/scores/peer/review-tasks/${taskId}/submit`, data)
+}
+
 export function getMyPeerReviews() {
   return request.get('/peer-reviewers/my-reviews')
 }
 
 export function submitPeerScore(recordId, data) {
   return request.post(`/scores/peer/${recordId}`, data)
+}
+
+export function getSelfAssessmentData(recordId) {
+  return request.get(`/scores/self/${recordId}`)
+}
+
+export function createScoreDraft(data) {
+  return request.post('/score-drafts', data)
+}
+
+export function getScoreDrafts(recordId, draftType) {
+  const params = draftType ? { draft_type: draftType } : {}
+  return request.get(`/score-drafts/${recordId}`, { params })
 }
 
 export function getMyAssessment() {

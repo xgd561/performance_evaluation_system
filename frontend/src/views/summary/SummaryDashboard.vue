@@ -30,12 +30,19 @@
         <el-table-column prop="position_name" label="岗位" />
         <el-table-column prop="total_score" label="总分" width="100">
           <template #default="scope">
-            <el-tag :type="scoreTagType(scope.row.total_score)">{{ scope.row.total_score }}</el-tag>
+            <el-tag :type="abnormalScoreTagType(scope.row.total_score)">{{ scope.row.total_score }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="grade" label="等级" width="100">
+        <el-table-column prop="grade" label="等级" width="120">
           <template #default="scope">
             <el-tag :type="gradeTagType(scope.row.grade)">{{ scope.row.grade || '—' }}</el-tag>
+            <el-tooltip
+              v-if="scope.row.original_grade && scope.row.original_grade !== scope.row.grade"
+              :content="`强制分布调整: 原等级 ${scope.row.original_grade} → 调整后 ${scope.row.grade}`"
+              placement="top"
+            >
+              <el-icon class="force-adjust-icon"><WarningFilled /></el-icon>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column prop="weighted_performance" label="业绩分" width="100" />
@@ -49,7 +56,6 @@
       </el-table>
     </el-card>
 
-    <!-- Distribution Card -->
     <el-card class="mt-20" title="等级分布" v-if="distribution">
       <template #header>
         <span>等级分布</span>
@@ -63,16 +69,32 @@
         </el-row>
       </div>
     </el-card>
+
+    <!-- Pie Chart Card -->
+    <el-card class="mt-20" v-if="distribution && distribution.overall_distribution && Object.keys(distribution.overall_distribution).length > 0">
+      <template #header>
+        <span>等级分布图</span>
+      </template>
+      <v-chart class="pie-chart" :option="pieChartOption" autoresize />
+    </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { WarningFilled } from '@element-plus/icons-vue'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { PieChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, LegendComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
 import { getScoreSummary, calculateScores } from '@/api/scores'
 import { getDistribution } from '@/api/reports'
 import { listCycles } from '@/api/cycles'
 import { listDepartments } from '@/api/departments'
+
+use([CanvasRenderer, PieChart, TitleComponent, TooltipComponent, LegendComponent])
 
 const loading = ref(false)
 const calcLoading = ref(false)
@@ -95,6 +117,16 @@ function scoreTagType(score) {
   return 'danger'
 }
 
+function abnormalScoreTagType(score) {
+  if (!score) return 'info'
+  const s = parseFloat(score)
+  if (s < 60 || s > 98) return 'danger'
+  if (s >= 90) return 'success'
+  if (s >= 80) return ''
+  if (s >= 60) return 'warning'
+  return 'danger'
+}
+
 function gradeTagType(grade) {
   if (grade === 'A') return 'success'
   if (grade === 'B') return ''
@@ -110,6 +142,7 @@ function statusText(status) {
     pending_peer: '待协作评',
     pending_summary: '汇总中',
     pending_approval: '审批中',
+    pending_distribution_review: '待分布审核',
     published: '已发布',
     archived: '已归档',
   }
@@ -184,9 +217,34 @@ async function handleCalculate() {
   }
 }
 
-onMounted(() => {
-  loadCycles()
-  loadDepartments()
+const pieChartOption = computed(() => {
+  if (!distribution.value || !distribution.value.overall_distribution) {
+    return {}
+  }
+  const data = Object.entries(distribution.value.overall_distribution).map(([grade, count]) => ({
+    name: grade + ' 等级',
+    value: count,
+  }))
+  return {
+    title: { text: '等级分布', left: 'center' },
+    tooltip: { trigger: 'item' },
+    legend: { orient: 'vertical', left: 'left' },
+    series: [
+      {
+        name: '等级分布',
+        type: 'pie',
+        radius: '50%',
+        data,
+        emphasis: {
+          itemStyle: {
+            shadowBlur: 10,
+            shadowOffsetX: 0,
+            shadowColor: 'rgba(0, 0, 0, 0.5)',
+          },
+        },
+      },
+    ],
+  }
 })
 </script>
 
@@ -199,5 +257,15 @@ onMounted(() => {
 }
 .toolbar {
   margin-bottom: 16px;
+}
+.force-adjust-icon {
+  color: red;
+  margin-left: 6px;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.pie-chart {
+  width: 100%;
+  height: 400px;
 }
 </style>

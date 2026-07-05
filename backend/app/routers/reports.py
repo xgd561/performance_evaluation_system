@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from collections import Counter
 import json
@@ -214,10 +214,11 @@ def get_distribution_adjustments(
 @router.get("/employee/{employee_id}/trend")
 def get_employee_trend(
     employee_id: int,
+    limit: int = Query(8, ge=1, le=20),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """获取员工历史绩效趋势"""
+    """获取员工历史绩效趋势（P6-03）"""
     # P0-8: Data isolation
     if user.role == "peer":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
@@ -245,7 +246,7 @@ def get_employee_trend(
     # P1-18: 员工只能查看已发布/已归档的考核结果
     if user.role == "employee":
         records = records.filter(AssessmentRecord.status.in_(["published", "archived"]))
-    records = records.order_by(AssessmentRecord.created_at.asc()).limit(8).all()
+    records = records.order_by(AssessmentRecord.created_at.asc()).limit(limit).all()
 
     result = []
     for r in records:

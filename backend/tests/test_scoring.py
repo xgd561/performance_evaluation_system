@@ -434,10 +434,13 @@ class TestScoreCalculation:
         assert resp.status_code == 200
         data = resp.json()
         assert data["calculated"] == 1
-        assert data["status"] == "pending_summary"
+        assert data["status"] == "completed"
+        assert "abnormal_count" in data
+        assert "pending_distribution_review_count" in data
+        assert "pending_approval_count" in data
 
         db_session.refresh(record)
-        assert record.status == "pending_summary"
+        assert record.status in ["pending_distribution_review", "pending_approval"]
         assert record.total_score is not None
         assert record.grade is not None
         assert record.weighted_performance is not None
@@ -489,7 +492,11 @@ class TestScoreSummary:
 
     def test_get_summary_with_department_filter(self, client: TestClient, admin_token, employee_user, db_session: Session):
         cycle = _create_cycle(db_session)
-        record = _create_record(db_session, cycle.id, employee_user.employee_id, status="pending_summary")
+        record = _create_record(
+            db_session, cycle.id, employee_user.employee_id, status="pending_summary",
+            self_scores='{"performance":80,"ability":70,"attitude":90}',
+            manager_scores='{"performance":85,"ability":75,"attitude":95}',
+        )
         # employee_user is in 技术部 (dept id from fixture), but record has no department_id set by default
         # Let's set it explicitly
         dept = db_session.query(Department).filter(Department.code == "TECH").first()
@@ -569,7 +576,13 @@ class TestRoleBasedAccessControl:
 
     def test_admin_can_access_all(self, client: TestClient, admin_token, employee_user, db_session: Session):
         cycle = _create_cycle(db_session)
-        record = _create_record(db_session, cycle.id, employee_user.employee_id, status="pending_summary")
+        record = _create_record(
+            db_session, cycle.id, employee_user.employee_id,
+            status="pending_summary",
+            self_scores='{"performance":80,"ability":70,"attitude":90}',
+            manager_scores='{"performance":85,"ability":75,"attitude":95}',
+            peer_scores='{"performance":82,"ability":72,"attitude":92}'
+        )
 
         resp_summary = client.get(f"/scores/summary/{cycle.id}", headers={"Authorization": f"Bearer {admin_token}"})
         assert resp_summary.status_code == 200

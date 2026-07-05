@@ -2,7 +2,8 @@ import { test, expect } from '@playwright/test'
 
 /**
  * E2E 场景 2：HR 创建并启动考核周期
- * 覆盖：登录 → 新增周期 → 选择部门 → 设置时间 → 保存 → 启动 → 验证进度
+ * 覆盖：登录（张燕子）→ 新增周期 → 选择研发部和产品部员工 → 设置截止时间 → 保存 → 启动考核
+ * → 验证仪表盘显示待自评状态 → 验证员工（王志强）收到待自评通知
  */
 
 async function hrLogin(page) {
@@ -14,7 +15,7 @@ async function hrLogin(page) {
 }
 
 async function getToken(page, username, password) {
-  const res = await page.request.post('/api/auth/login', {
+  const res = await page.request.post('/api/v1/auth/login', {
     headers: { 'Content-Type': 'application/json' },
     data: JSON.stringify({ username, password })
   })
@@ -43,12 +44,19 @@ test.describe('场景 2 — HR 创建并启动考核周期', () => {
     await page.waitForTimeout(300)
     await page.getByRole('option', { name: '月度' }).click()
 
+    // 设置考核时间（5 号到 25 号，确保不早于今天）
     const dateFormItem = dialog.locator('.el-form-item').filter({ hasText: '考核时间' })
     await dateFormItem.click()
     await page.waitForTimeout(300)
-    await page.getByRole('gridcell', { name: '1' }).first().click()
-    await page.getByRole('gridcell', { name: '31' }).last().click()
+    await page.getByRole('gridcell', { name: '5' }).first().click()
+    await page.getByRole('gridcell', { name: '25' }).last().click()
     await page.waitForTimeout(300)
+
+    // 设置截止时间
+    await dialog.locator('.el-form-item').filter({ hasText: '自评截止' }).locator('input').first().fill('2026-07-15')
+    await dialog.locator('.el-form-item').filter({ hasText: '上级评截止' }).locator('input').first().fill('2026-07-25')
+    await dialog.locator('.el-form-item').filter({ hasText: '协作评截止' }).locator('input').first().fill('2026-07-30')
+    await page.waitForTimeout(200)
 
     await dialog.getByRole('button', { name: '确定' }).click()
     await expect(page.getByText('创建成功')).toBeVisible()
@@ -59,15 +67,19 @@ test.describe('场景 2 — HR 创建并启动考核周期', () => {
     const row = page.locator('table tbody tr').filter({ hasText: cycleName })
     await expect(row).toBeVisible()
 
-    // 启动考核（需要 API 前置获取员工）
+    // 通过 API 获取员工列表（研发部和产品部）
     const adminToken = await getToken(page, 'admin', 'admin123')
-    const emps = await page.request.get('/api/employees?page=1&size=100', {
+    const emps = await page.request.get('/api/v1/employees?page=1&size=100', {
       headers: { Authorization: `Bearer ${adminToken}` }
     }).then(r => r.json()).then(j => j.items || [])
-    const empIds = emps.slice(0, 2).map(e => e.id)
 
+    // 筛选研发部和产品部的员工（王志强 EMP001 在研发部）
+    const targetEmps = emps.filter(e => e.department_name === '研发部' || e.department_name === '产品部')
+    const empIds = targetEmps.slice(0, 2).map(e => e.id)
+
+    // 启动考核
     const cycleRow = page.locator('table tbody tr').filter({ hasText: cycleName })
-    await cycleRow.locator('button').filter({ hasText: '发起' }).click()
+    await cycleRow.locator('button').filter({ hasText: '启动' }).click()
     await page.waitForTimeout(3000)
 
     const launchDialog = page.locator('.el-dialog').filter({ hasText: '发起考核' })
@@ -76,8 +88,14 @@ test.describe('场景 2 — HR 创建并启动考核周期', () => {
 
     // 选择员工
     if (empIds.length > 0) {
-      await launchDialog.locator('.el-transfer-panel').first().locator('.el-transfer-panel__item').first().click()
-      await page.waitForTimeout(200)
+      const transferItems = await launchDialog.locator('.el-transfer-panel').first().locator('.el-transfer-panel__item').all()
+      for (const item of transferItems) {
+        const label = await item.textContent()
+        if (label && (label.includes('王志强') || label.includes('陈志强') || label.includes('赵晓峰'))) {
+          await item.click()
+          await page.waitForTimeout(200)
+        }
+      }
       await launchDialog.locator('.el-transfer__button').last().click()
       await page.waitForTimeout(200)
     }
@@ -89,6 +107,20 @@ test.describe('场景 2 — HR 创建并启动考核周期', () => {
     await page.reload()
     await page.waitForTimeout(500)
     const updatedRow = page.locator('table tbody tr').filter({ hasText: cycleName })
-    await expect(updatedRow.locator('td').nth(7)).toContainText('自评中')
+    await expect(updatedRow.locator('td').nth(8)).toContainText('自评中')
+
+    // 验证仪表盘显示待自评状态
+    await page.goto('/dashboard')
+    await page.waitForTimeout(500)
+    await expect(page.getByText('自评中').first()).toBeVisible()
+    await expect(page.getByText(cycleName).first()).toBeVisible()
+
+    // 验证员工（王志强）收到待自评通知
+    const empToken = await getToken(page, 'emp001', 'Emp001@123')
+    const notifs = await page.request.get('/api/v1/notifications?page=1&size=10', {
+      headers: { Authorization: `Bearer ${empToken}` }
+    }).then(r => r.json()).then(j => Array.isArray(j) ? j : (j.items || []))
+    const hasCycleNotif = notifs.some(n => n.content.includes('自评'))
+    expect(hasCycleNotif).toBe(true)
   })
 })

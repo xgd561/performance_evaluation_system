@@ -1,13 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from collections import Counter
+from datetime import date
 import json
 
 from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import (
-    AssessmentCycle, Employee, AssessmentRecord, CycleEmployee, KpiTemplate, Position,
+    AssessmentCycle, Employee, AssessmentRecord, CycleEmployee, KpiTemplate, Position, Department, User,
 )
 from app.schemas import (
     AssessmentCycleCreate,
@@ -20,18 +21,70 @@ from app.schemas import (
 )
 
 from app.services.operation_logger import log_operation
+from app.services.notification_service import create_notification
+from app.utils.workflow_state_machine import WorkflowStateMachine
 
-from app.services.operation_logger import log_operation
+
+def _parse_json_field(value):
+    """安全解析 JSON 字段：兼容字符串和已反序列化的 dict/list"""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
 
 router = APIRouter()
 
 
 @router.get("")
 def list_cycles(
+    status: Optional[str] = Query(None, description="按状态筛选"),
+    type: Optional[str] = Query(None, description="按类型筛选"),
+    start_date: Optional[date] = Query(None, description="开始日期"),
+    end_date: Optional[date] = Query(None, description="结束日期"),
+    page: Optional[int] = Query(None, ge=1, description="页码"),
+    size: Optional[int] = Query(None, ge=1, le=100, description="每页条数"),
     db: Session = Depends(get_db),
     user = Depends(get_current_user),
 ):
-    cycles = db.query(AssessmentCycle).order_by(AssessmentCycle.created_at.desc()).all()
+    query = db.query(AssessmentCycle).order_by(AssessmentCycle.created_at.desc())
+    if status:
+        query = query.filter(AssessmentCycle.status == status)
+    if type:
+        query = query.filter(AssessmentCycle.type == type)
+    if start_date:
+        query = query.filter(AssessmentCycle.start_date >= start_date)
+    if end_date:
+        query = query.filter(AssessmentCycle.end_date <= end_date)
+
+    if page and size:
+        total = query.count()
+        cycles = query.offset((page - 1) * size).limit(size).all()
+        items = []
+        for c in cycles:
+            items.append({
+                "id": c.id,
+                "name": c.name,
+                "type": c.type,
+                "start_date": str(c.start_date) if c.start_date else None,
+                "end_date": str(c.end_date) if c.end_date else None,
+                "self_due_date": str(c.self_due_date) if c.self_due_date else None,
+                "manager_due_date": str(c.manager_due_date) if c.manager_due_date else None,
+                "peer_due_date": str(c.peer_due_date) if c.peer_due_date else None,
+                "status": c.status,
+                "weights": _parse_json_field(c.dimension_weights),
+                "grade_rules": _parse_json_field(c.grade_rules),
+                "is_distribution_enabled": c.is_distribution_enabled,
+                "small_dept_exemption": c.small_dept_exemption,
+                "peer_review_enabled": c.peer_review_enabled,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            })
+        return {"total": total, "page": page, "size": size, "items": items}
+
+    cycles = query.all()
     result = []
     for c in cycles:
         result.append({
@@ -44,14 +97,56 @@ def list_cycles(
             "manager_due_date": str(c.manager_due_date) if c.manager_due_date else None,
             "peer_due_date": str(c.peer_due_date) if c.peer_due_date else None,
             "status": c.status,
-            "weights": json.loads(c.dimension_weights) if c.dimension_weights else {},
-            "grade_rules": json.loads(c.grade_rules) if c.grade_rules else {},
+            "weights": _parse_json_field(c.dimension_weights),
+            "grade_rules": _parse_json_field(c.grade_rules),
             "is_distribution_enabled": c.is_distribution_enabled,
             "small_dept_exemption": c.small_dept_exemption,
             "peer_review_enabled": c.peer_review_enabled,
             "created_at": c.created_at.isoformat() if c.created_at else None,
         })
     return result
+
+
+@router.get("/{cycle_id}")
+def get_cycle_detail(
+    cycle_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    """查询考核周期详情，含考核对象部门列表"""
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
+
+    # 获取考核对象部门列表
+    cycle_employees = db.query(CycleEmployee).filter(CycleEmployee.cycle_id == cycle_id).all()
+    emp_ids = [ce.employee_id for ce in cycle_employees]
+    departments = []
+    if emp_ids:
+        employees = db.query(Employee).filter(Employee.id.in_(emp_ids)).all()
+        dept_ids = {emp.department_id for emp in employees if emp.department_id}
+        if dept_ids:
+            depts = db.query(Department).filter(Department.id.in_(dept_ids)).all()
+            departments = [{"id": d.id, "name": d.name, "code": d.code} for d in depts]
+
+    return {
+        "id": cycle.id,
+        "name": cycle.name,
+        "type": cycle.type,
+        "start_date": str(cycle.start_date) if cycle.start_date else None,
+        "end_date": str(cycle.end_date) if cycle.end_date else None,
+        "self_due_date": str(cycle.self_due_date) if cycle.self_due_date else None,
+        "manager_due_date": str(cycle.manager_due_date) if cycle.manager_due_date else None,
+        "peer_due_date": str(cycle.peer_due_date) if cycle.peer_due_date else None,
+        "status": cycle.status,
+        "weights": _parse_json_field(cycle.dimension_weights),
+        "grade_rules": _parse_json_field(cycle.grade_rules),
+        "is_distribution_enabled": cycle.is_distribution_enabled,
+        "small_dept_exemption": cycle.small_dept_exemption,
+        "peer_review_enabled": cycle.peer_review_enabled,
+        "created_at": cycle.created_at.isoformat() if cycle.created_at else None,
+        "departments": departments,
+    }
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -79,6 +174,11 @@ def create_cycle(
                 normalized_grade_rules[grade] = {"min": value, "max": 100}
         else:
             normalized_grade_rules[grade] = {"min": 0, "max": 100}
+
+    # 校验名称唯一性
+    existing = db.query(AssessmentCycle).filter(AssessmentCycle.name == req.name).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="考核周期名称已存在")
 
     cycle = AssessmentCycle(
         name=req.name,
@@ -127,7 +227,7 @@ def update_cycle(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
 
     if cycle.status != "not_started":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="已发起的考核周期不可修改")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="已发起的考核周期不可修改")
 
     for field, value in req.model_dump(exclude_unset=True).items():
         if field == "weights":
@@ -163,8 +263,8 @@ def update_cycle(
         "manager_due_date": str(cycle.manager_due_date) if cycle.manager_due_date else None,
         "peer_due_date": str(cycle.peer_due_date) if cycle.peer_due_date else None,
         "status": cycle.status,
-        "weights": json.loads(cycle.dimension_weights) if cycle.dimension_weights else {},
-        "grade_rules": json.loads(cycle.grade_rules) if cycle.grade_rules else {},
+        "weights": _parse_json_field(cycle.dimension_weights),
+        "grade_rules": _parse_json_field(cycle.grade_rules),
         "is_distribution_enabled": cycle.is_distribution_enabled,
         "small_dept_exemption": cycle.small_dept_exemption,
         "peer_review_enabled": cycle.peer_review_enabled,
@@ -182,10 +282,13 @@ def delete_cycle(
     if not cycle:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
 
+    if cycle.status != "not_started":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有未开始的考核周期才能删除")
+
     records = db.query(AssessmentRecord).filter(AssessmentRecord.cycle_id == cycle_id).first()
     if records:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="该周期已包含考核数据，不可删除",
         )
 
@@ -247,6 +350,18 @@ def launch_cycle(
     cycle.status = "pending_self"
     db.commit()
 
+    # 发送通知给相关员工
+    for emp in employees:
+        emp_user = db.query(User).filter(User.employee_id == emp.id).first()
+        if emp_user:
+            create_notification(
+                db=db,
+                user_id=emp_user.id,
+                title=f"考核周期「{cycle.name}」已启动",
+                content=f"请尽快完成「{cycle.name}」的自评。",
+                type="cycle_start",
+            )
+
     log_operation(
         db=db,
         user_id=user.id,
@@ -255,6 +370,89 @@ def launch_cycle(
         target_id=cycle.id,
         old_value={"status": "not_started"},
         new_value={"status": "pending_self", "created_records": created, "employee_ids": req.employee_ids},
+    )
+
+    return {"created_records": created, "status": "进行中（自评）"}
+
+
+@router.post("/{cycle_id}/start")
+def start_cycle(
+    cycle_id: int,
+    req: LaunchCycleRequest,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr")),
+):
+    """启动考核周期（RESTful 风格）：验证、创建记录、KPI 快照、发送通知"""
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
+
+    if not req.employee_ids:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="至少选择一名员工")
+
+    employees = db.query(Employee).filter(Employee.id.in_(req.employee_ids), Employee.is_active == True).all()
+    if len(employees) != len(req.employee_ids):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="部分员工不存在或已离职")
+
+    created = 0
+    for emp in employees:
+        ce = db.query(CycleEmployee).filter(
+            CycleEmployee.cycle_id == cycle.id,
+            CycleEmployee.employee_id == emp.id,
+        ).first()
+        if not ce:
+            ce = CycleEmployee(cycle_id=cycle.id, employee_id=emp.id, status="pending")
+            db.add(ce)
+
+        record = db.query(AssessmentRecord).filter(
+            AssessmentRecord.cycle_id == cycle.id,
+            AssessmentRecord.employee_id == emp.id,
+        ).first()
+        if not record:
+            kpi_templates = db.query(KpiTemplate).filter(
+                KpiTemplate.position_id == emp.position_id,
+                KpiTemplate.is_active == True,
+            ).all()
+
+            record = AssessmentRecord(
+                cycle_id=cycle.id,
+                employee_id=emp.id,
+                position_id=emp.position_id,
+                department_id=emp.department_id,
+                status="pending_self",
+                kpi_snapshot=json.dumps([{"name": k.name, "weight": str(k.weight), "target_value": k.target_value} for k in kpi_templates]) if kpi_templates else None,
+            )
+            db.add(record)
+            created += 1
+
+    # 使用状态机执行状态转换（自动校验并返回目标状态）
+    next_state = WorkflowStateMachine.transition(
+        current_state=cycle.status,
+        action="start_cycle",
+    )
+    cycle.status = next_state
+    db.commit()
+
+    # 发送通知给相关员工
+    for emp in employees:
+        emp_user = db.query(User).filter(User.employee_id == emp.id).first()
+        if emp_user:
+            create_notification(
+                db=db,
+                user_id=emp_user.id,
+                title=f"考核周期「{cycle.name}」已启动",
+                content=f"请尽快完成「{cycle.name}」的自评。",
+                type="cycle_start",
+            )
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="start_cycle",
+        target_type="assessment_cycle",
+        target_id=cycle.id,
+        old_value={"status": "not_started"},
+        new_value={"status": next_state, "created_records": created, "employee_ids": req.employee_ids},
     )
 
     return {"created_records": created, "status": "进行中（自评）"}
@@ -378,7 +576,6 @@ def cycle_progress(
     ).count()
     progress = round((completed / total * 100), 1) if total > 0 else 0
 
-    # 基于 AssessmentRecord 实际状态聚合计算各阶段进度，修复 cycle.status 布尔判断导致的过度乐观问题
     records = db.query(AssessmentRecord).filter(AssessmentRecord.cycle_id == cycle_id).all()
     status_counts = Counter(r.status for r in records)
     total_records = len(records)
@@ -431,6 +628,64 @@ def cycle_progress(
         },
     ]
 
+    # ---------- P3-06: 详细进度监控数据 ----------
+    def _rate(completed_statuses):
+        if total_records == 0:
+            return 0.0
+        return round(sum(status_counts[s] for s in completed_statuses) / total_records * 100, 1)
+
+    self_completed_statuses = ["pending_manager", "pending_peer", "pending_summary", "pending_approval", "pending_interview", "published", "archived", "cancelled"]
+    manager_completed_statuses = ["pending_peer", "pending_summary", "pending_approval", "pending_interview", "published", "archived", "cancelled"]
+    peer_completed_statuses = ["pending_summary", "pending_approval", "pending_interview", "published", "archived", "cancelled"]
+
+    self_completion_rate = _rate(self_completed_statuses)
+    manager_completion_rate = _rate(manager_completed_statuses)
+    peer_completion_rate = _rate(peer_completed_statuses) if cycle.peer_review_enabled else 100.0
+
+    # 各部门完成率（按自评完成率计算）
+    department_stats = {}
+    for record in records:
+        dept_id = record.department_id
+        if dept_id not in department_stats:
+            department_stats[dept_id] = {"total": 0, "completed": 0}
+        department_stats[dept_id]["total"] += 1
+        if record.status in self_completed_statuses:
+            department_stats[dept_id]["completed"] += 1
+
+    department_completion = []
+    for dept_id, stats in department_stats.items():
+        dept = db.query(Department).filter(Department.id == dept_id).first()
+        department_completion.append({
+            "department_id": dept_id,
+            "department_name": dept.name if dept else "未知部门",
+            "total": stats["total"],
+            "completed": stats["completed"],
+            "rate": round(stats["completed"] / stats["total"] * 100, 1) if stats["total"] > 0 else 0.0,
+        })
+
+    # 未完成人员名单（当前阶段未完成）
+    incomplete_employees = []
+    for record in records:
+        if record.status in ["pending_self", "pending_manager", "pending_peer", "pending_summary", "pending_approval", "pending_interview"]:
+            emp = db.query(Employee).filter(Employee.id == record.employee_id).first()
+            dept = db.query(Department).filter(Department.id == record.department_id).first() if emp else None
+            stage_map = {
+                "pending_self": "自评",
+                "pending_manager": "上级评",
+                "pending_peer": "协作评",
+                "pending_summary": "汇总",
+                "pending_approval": "审批",
+                "pending_interview": "待发布",
+            }
+            incomplete_employees.append({
+                "employee_id": record.employee_id,
+                "employee_name": emp.name if emp else "未知",
+                "employee_no": emp.employee_no if emp else "",
+                "department_name": dept.name if dept else "",
+                "current_stage": stage_map.get(record.status, record.status),
+                "status": record.status,
+            })
+
     return {
         "cycle_id": cycle_id,
         "status": cycle.status,
@@ -439,6 +694,11 @@ def cycle_progress(
         "total_employees": total,
         "completed": completed,
         "last_updated": cycle.updated_at.isoformat() if cycle.updated_at else cycle.created_at.isoformat() if cycle.created_at else None,
+        "self_completion_rate": self_completion_rate,
+        "manager_completion_rate": manager_completion_rate,
+        "peer_completion_rate": peer_completion_rate,
+        "department_completion": department_completion,
+        "incomplete_employees": incomplete_employees,
     }
 
 

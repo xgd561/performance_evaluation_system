@@ -1,7 +1,11 @@
 import request from './request'
 
-export function listCycles() {
-  return request.get('/assessment-cycles')
+export function listCycles(params = {}) {
+  return request.get('/assessment-cycles', { params })
+}
+
+export function getCycleDetail(id) {
+  return request.get(`/assessment-cycles/${id}`)
 }
 
 export function createCycle(data) {

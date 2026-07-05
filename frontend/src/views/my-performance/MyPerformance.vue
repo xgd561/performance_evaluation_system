@@ -46,9 +46,33 @@
         </div>
       </el-card>
 
+      <!-- 强制分布调整警告 -->
+      <el-alert
+        v-if="currentRecord?.is_distribution_override"
+        type="warning"
+        :closable="false"
+        show-icon
+        class="mt-20"
+      >
+        <template #default>
+          <span>
+            强制分布调整：您的绩效等级被强制调整。
+            <template v-if="currentRecord.override_reason">
+              原因：{{ currentRecord.override_reason }}
+            </template>
+          </span>
+        </template>
+      </el-alert>
+
       <!-- 历史趋势图 -->
       <el-card class="mt-20">
         <div class="card-title">历史绩效趋势</div>
+        <div class="trend-toggle">
+          <el-radio-group v-model="trendLimit" size="small" @change="onTrendLimitChange">
+            <el-radio-button :label="4">近4期</el-radio-button>
+            <el-radio-button :label="8">近8期</el-radio-button>
+          </el-radio-group>
+        </div>
         <div ref="chartRef" class="chart-wrap" />
       </el-card>
 
@@ -190,6 +214,7 @@ const loading = ref(false)
 const records = ref([])
 const currentRecord = ref(null)
 const chartRef = ref(null)
+const trendLimit = ref(8)
 
 const detailDrawerVisible = ref(false)
 const detailLoading = ref(false)
@@ -241,7 +266,7 @@ onMounted(async () => {
       currentRecord.value = records.value[0]
     }
 
-    const trendRes = await getEmployeeTrend(employeeId.value)
+    const trendRes = await getEmployeeTrend(employeeId.value, { limit: trendLimit.value })
     nextTick(() => {
       renderChart(trendRes?.items || [])
     })
@@ -252,6 +277,16 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+async function onTrendLimitChange(limit) {
+  try {
+    const trendRes = await getEmployeeTrend(employeeId.value, { limit })
+    renderChart(trendRes?.items || [])
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('加载趋势数据失败')
+  }
+}
 
 function renderChart(items) {
   if (!chartRef.value) return
@@ -531,6 +566,10 @@ function goAppeal(row) {
   margin: 0 0 12px;
   font-size: 14px;
   color: #303133;
+}
+
+.trend-toggle {
+  margin-bottom: 16px;
 }
 
 .score-tags {

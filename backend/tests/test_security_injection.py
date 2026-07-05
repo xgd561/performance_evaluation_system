@@ -14,7 +14,7 @@ def test_sql_injection_in_login():
     """登录接口 SQL 注入防护"""
     malicious_payloads = [
         {"username": "admin' OR '1'='1", "password": "anything"},
-        {"username": "admin"; DROP TABLE users; --", "password": "test"},
+        {"username": "admin'; DROP TABLE users; --", "password": "test"},
         {"username": "admin' UNION SELECT * FROM employees --", "password": "test"},
     ]
     for payload in malicious_payloads:

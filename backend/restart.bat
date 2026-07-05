@@ -1,49 +1,57 @@
 @echo off
-chcp 65001 >nul
-setlocal enabledelayedexpansion
+chcp 65001 >/dev/null
+setlocal
 
 set PORT=8000
+set PYTHON="D:\Program Files\Python311\python.exe"
+set UVICORN_ARGS=app.main:app --host 0.0.0.0 --port %PORT%
 
-echo ==========================================
-echo  绩效考核系统后端重启脚本
-echo ==========================================
-echo.
+echo [%date% %time%] 开始重启后端服务...
 
-REM 查找并停止占用端口的进程
-echo [1/3] 正在查找占用端口 %PORT% 的进程...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%PORT%" ^| findstr "LISTENING"') do (
-    echo        发现进程 PID: %%a，正在停止...
-    taskkill /F /PID %%a >nul 2>&1
+:: 查找并终止占用端口的 Python 进程
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :%PORT%') do (
+    echo [%date% %time%] 发现占用端口 %PORT% 的进程 PID: %%a
+    taskkill /F /PID %%a >/dev/null 2>&1
     if errorlevel 1 (
-        echo        ⚠ 无法停止 PID %%a（可能权限不足或进程已退出）
+        echo [%date% %time%] 终止进程 %%a 失败
     ) else (
-        echo        ✓ 已停止 PID %%a
+        echo [%date% %time%] 已终止进程 %%a
     )
 )
 
-echo.
-echo [2/3] 等待端口释放...
-timeout /t 2 /nobreak >nul
+:: 额外清理可能残留的 uvicorn/python 进程
+taskkill /F /IM python.exe >/dev/null 2>&1
+echo [%date% %time%] 已清理残留 python 进程
 
-REM 检查端口是否仍被占用
-netstat -ano | findstr ":%PORT%" | findstr "LISTENING" >nul
+:: 等待端口释放
+echo [%date% %time%] 等待端口释放...
+:wait_loop
+netstat -ano | findstr :%PORT% >/dev/null
 if not errorlevel 1 (
-    echo ⚠ 警告：端口 %PORT% 仍被占用，可能存在僵尸进程
-    echo   建议：打开任务管理器手动结束 python.exe 进程
-    echo.
+    timeout /t 1 /nobreak >/dev/null
+    goto wait_loop
 )
+echo [%date% %time%] 端口 %PORT% 已释放
 
-echo [3/3] 启动后端服务...
-echo   命令: python -m uvicorn app.main:app --port %PORT% --host 0.0.0.0
-echo.
-echo ==========================================
-python -m uvicorn app.main:app --port %PORT% --host 0.0.0.0
+:: 启动新服务
+start /b %PYTHON% -m uvicorn %UVICORN_ARGS%
+echo [%date% %time%] 新服务已启动
 
-REM 如果 python 命令失败，暂停显示错误
+:: 等待服务就绪
+set RETRY=0
+:health_check
+timeout /t 1 /nobreak >/dev/null
+%PYTHON% -c "import urllib.request; urllib.request.urlopen('http://localhost:%PORT%/api/v1/auth/login', timeout=2)" >/dev/null 2>&1
 if errorlevel 1 (
-    echo.
-    echo ❌ 启动失败，请检查错误信息
-    pause
+    set /a RETRY+=1
+    if %RETRY% lss 10 (
+        echo [%date% %time%] 等待服务就绪... (%RETRY%/10)
+        goto health_check
+    ) else (
+        echo [%date% %time%] 服务启动超时，请检查日志
+        exit /b 1
+    )
 )
 
+echo [%date% %time%] 服务已就绪，重启完成
 endlocal

@@ -5,7 +5,7 @@ from sqlalchemy import func
 from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import (
-    AssessmentCycle, Employee, AssessmentRecord, CycleEmployee, ApprovalRecord, AppealRecord, InterviewRecord, User, PeerReviewer
+    AssessmentCycle, Employee, AssessmentRecord, CycleEmployee, ApprovalRecord, AppealRecord, InterviewRecord, User, PeerReviewer, Department
 )
 from app.routers.employees import get_all_dept_ids
 
@@ -25,64 +25,103 @@ def get_dashboard(
 
     total_cycles = db.query(AssessmentCycle).count()
 
-    if user.role in ("admin", "hr", "executive"):
-        # Admin/HR/Executive: global stats
+    stats = {
+        "total_cycles": total_cycles,
+        "total_employees": 0,
+        "pending_approvals": 0,
+        "pending_appeals": 0,
+    }
+
+    if user.role == "admin":
+        stats["employee_count"] = db.query(Employee).filter(Employee.is_active == True).count()
+        stats["department_count"] = db.query(Department).count()
+        stats["cycle_count"] = total_cycles
+        stats["active_cycle_count"] = db.query(AssessmentCycle).filter(
+            AssessmentCycle.status.notin_(["not_started", "archived"])
+        ).count()
+        stats["total_employees"] = stats["employee_count"]
+        stats["pending_approvals"] = db.query(ApprovalRecord).filter(ApprovalRecord.action == None).count()
+        stats["pending_appeals"] = db.query(AppealRecord).filter(AppealRecord.status == "pending").count()
+
+    elif user.role == "hr":
+        stats["cycle_count"] = total_cycles
+        stats["to_summary"] = db.query(AssessmentRecord).filter(
+            AssessmentRecord.status.in_(["pending_summary", "pending_distribution_review"])
+        ).count()
+        stats["to_approve"] = db.query(AssessmentRecord).filter(
+            AssessmentRecord.status == "pending_approval"
+        ).count()
+        stats["to_archive"] = db.query(AssessmentRecord).filter(
+            AssessmentRecord.status == "published"
+        ).count()
+        stats["pending_appeals"] = db.query(AppealRecord).filter(
+            AppealRecord.status == "pending"
+        ).count()
+        stats["force_distribution_exceeded"] = 0
+        stats["total_employees"] = db.query(Employee).filter(Employee.is_active == True).count()
+        stats["pending_approvals"] = stats["to_approve"]
+
+    elif user.role == "executive":
         employee_count = db.query(Employee).filter(Employee.is_active == True).count()
-        pending_approvals = db.query(ApprovalRecord).filter(ApprovalRecord.action == None).count()
-        pending_appeals = db.query(AppealRecord).filter(AppealRecord.status == "pending").count()
+        stats["employee_count"] = employee_count
+        stats["total_employees"] = employee_count
+        current_cycle = db.query(AssessmentCycle).filter(
+            AssessmentCycle.status.notin_(["not_started", "archived"])
+        ).order_by(AssessmentCycle.created_at.desc()).first()
+        coverage_rate = 0
+        if current_cycle and employee_count > 0:
+            covered = db.query(AssessmentRecord).filter(
+                AssessmentRecord.cycle_id == current_cycle.id
+            ).count()
+            coverage_rate = round(covered / employee_count * 100, 1)
+        stats["coverage_rate"] = coverage_rate
+        stats["avg_score"] = 0
+        stats["adjusted_count"] = 0
+        stats["pending_approvals"] = db.query(ApprovalRecord).filter(ApprovalRecord.action == None).count()
+        stats["pending_appeals"] = db.query(AppealRecord).filter(AppealRecord.status == "pending").count()
+
     elif user.role == "manager":
-        # Manager: team stats (subordinates + department tree)
         current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
         if current_employee:
             subordinate_ids = [sid[0] for sid in db.query(Employee.id).filter(Employee.manager_id == current_employee.id).all()]
             dept_ids = get_all_dept_ids(db, current_employee.department_id)
             dept_emp_ids = [eid[0] for eid in db.query(Employee.id).filter(Employee.department_id.in_(dept_ids)).all()]
             all_visible_ids = set(subordinate_ids) | set(dept_emp_ids) | {current_employee.id}
-
-            employee_count = len(all_visible_ids)
-            pending_approvals = db.query(ApprovalRecord).filter(
+            stats["total_employees"] = len(all_visible_ids)
+            stats["pending_approvals"] = db.query(ApprovalRecord).filter(
                 ApprovalRecord.approver_id.in_(list(all_visible_ids)),
                 ApprovalRecord.action == None
             ).count()
-            pending_appeals = db.query(AppealRecord).filter(
+            stats["pending_appeals"] = db.query(AppealRecord).filter(
                 AppealRecord.employee_id.in_(list(all_visible_ids)),
                 AppealRecord.status == "pending"
             ).count()
         else:
-            employee_count = 0
-            pending_approvals = 0
-            pending_appeals = 0
+            stats["total_employees"] = 0
+            stats["pending_approvals"] = 0
+            stats["pending_appeals"] = 0
+
     elif user.role in ("employee", "peer"):
-        # Employee/Peer: only own stats
         current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
         if current_employee:
-            employee_count = 1
-            pending_approvals = db.query(ApprovalRecord).filter(
+            stats["total_employees"] = 1
+            stats["pending_approvals"] = db.query(ApprovalRecord).filter(
                 ApprovalRecord.approver_id == current_employee.id,
                 ApprovalRecord.action == None
             ).count()
-            pending_appeals = db.query(AppealRecord).filter(
+            stats["pending_appeals"] = db.query(AppealRecord).filter(
                 AppealRecord.employee_id == current_employee.id,
                 AppealRecord.status == "pending"
             ).count()
         else:
-            employee_count = 0
-            pending_approvals = 0
-            pending_appeals = 0
-    else:
-        employee_count = 0
-        pending_approvals = 0
-        pending_appeals = 0
+            stats["total_employees"] = 0
+            stats["pending_approvals"] = 0
+            stats["pending_appeals"] = 0
 
     recent_cycles = db.query(AssessmentCycle).order_by(AssessmentCycle.created_at.desc()).limit(5).all()
 
     return {
-        "stats": {
-            "total_cycles": total_cycles,
-            "total_employees": employee_count,
-            "pending_approvals": pending_approvals,
-            "pending_appeals": pending_appeals,
-        },
+        "stats": stats,
         "recent_cycles": [
             {
                 "id": c.id,
@@ -167,8 +206,8 @@ def dashboard_manager(
 
     return {
         "to_review": to_review,
-        "pending_approval": pending_approval,
-        "pending_interview": pending_interview,
+        "to_approve": pending_approval,
+        "to_interview": pending_interview,
         "subordinate_count": len(subordinate_ids),
     }
 
@@ -244,9 +283,14 @@ def dashboard_employee(
             }
             self_status = record.status
 
+    appeal_count = db.query(AppealRecord).filter(
+        AppealRecord.employee_id == current_employee.id
+    ).count()
+
     return {
         "current_cycle": current_record,
         "self_status": self_status,
         "total_records": total_records,
         "pending_self": pending_self,
+        "appeal_count": appeal_count,
     }

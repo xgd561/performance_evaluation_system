@@ -18,9 +18,9 @@
           <el-divider />
           <div class="dimension-desc">
             <h4>评分维度说明</h4>
-            <p><strong>工作业绩（60%）：</strong>KPI 完成情况，如销售额、项目交付等</p>
-            <p><strong>工作能力（20%）：</strong>专业技能、沟通协作、学习能力</p>
-            <p><strong>工作态度（20%）：</strong>责任心、主动性、团队精神</p>
+            <p v-for="dim in dimensions" :key="dim.key">
+              <strong>{{ dim.label }}（{{ dim.weight }}%）：</strong>{{ dim.desc }}
+            </p>
           </div>
         </div>
       </div>
@@ -99,6 +99,33 @@
             </div>
           </div>
 
+          <!-- KPI 评分 -->
+          <div v-if="kpiItems.length > 0" class="kpi-section">
+            <h4>KPI 评分</h4>
+            <div class="kpi-list">
+              <div
+                v-for="(kpi, index) in kpiItems"
+                :key="index"
+                class="kpi-item"
+              >
+                <div class="kpi-header">
+                  <span class="kpi-name">{{ kpi.name }}</span>
+                  <span class="kpi-weight">权重 {{ kpi.weight }}%</span>
+                  <span class="kpi-target">目标: {{ kpi.target }}</span>
+                </div>
+                <el-input-number
+                  v-model="kpiScores[index]"
+                  :min="0"
+                  :max="100"
+                  :precision="1"
+                  :step="1"
+                  placeholder="0-100"
+                  class="score-input"
+                />
+              </div>
+            </div>
+          </div>
+
           <div class="submit-section">
             <el-button
               type="primary"
@@ -122,7 +149,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getMyAssessment, submitSelfScore, getManagerDraft, saveManagerDraft, deleteManagerDraft } from '@/api/scores'
+import { getMyAssessment, getSelfAssessmentData, submitSelfScore, createScoreDraft } from '@/api/scores'
 import { SCORE_ANCHORS, DIMENSION_TEXT } from '@/utils/constants'
 
 const router = useRouter()
@@ -140,6 +167,11 @@ const submittedScores = reactive({
   attitude: null,
 })
 
+const dimensionWeights = ref({})
+const reviewerWeights = ref({})
+const kpiItems = ref([])
+const kpiScores = ref([])
+
 const countdownDays = computed(() => {
   if (!assessmentInfo.deadline) return 1
   const diff = new Date(assessmentInfo.deadline) - Date.now()
@@ -152,11 +184,29 @@ const countdownText = computed(() => {
   return `${dateStr}（还剩 ${countdownDays.value} 天）`
 })
 
-const dimensions = [
-  { key: 'performance', label: DIMENSION_TEXT.performance, weight: 60 },
-  { key: 'ability', label: DIMENSION_TEXT.ability, weight: 20 },
-  { key: 'attitude', label: DIMENSION_TEXT.attitude, weight: 20 }
-]
+const dimensions = computed(() => {
+  const dw = dimensionWeights.value || {}
+  const list = []
+  const weightFn = (v) => {
+    if (v === undefined || v === null) return 0
+    return v <= 1 ? Math.round(v * 100) : v
+  }
+  const descMap = {
+    performance: 'KPI 完成情况，如销售额、项目交付等',
+    ability: '专业技能、沟通协作、学习能力',
+    attitude: '责任心、主动性、团队精神',
+  }
+  if (dw.performance !== undefined) {
+    list.push({ key: 'performance', label: DIMENSION_TEXT.performance, weight: weightFn(dw.performance), desc: descMap.performance })
+  }
+  if (dw.ability !== undefined) {
+    list.push({ key: 'ability', label: DIMENSION_TEXT.ability, weight: weightFn(dw.ability), desc: descMap.ability })
+  }
+  if (dw.attitude !== undefined) {
+    list.push({ key: 'attitude', label: DIMENSION_TEXT.attitude, weight: weightFn(dw.attitude), desc: descMap.attitude })
+  }
+  return list
+})
 
 const scoreForm = reactive({
   dimensionScores: {
@@ -172,9 +222,13 @@ const savingDraft = ref(false)
 const dimensionErrors = reactive({ performance: '', ability: '', attitude: '' })
 
 const canSubmit = computed(() => {
-  return Object.values(scoreForm.dimensionScores).every(
+  const dimsValid = Object.values(scoreForm.dimensionScores).every(
     s => s !== null && s !== undefined && s >= 0 && s <= 100
   )
+  const kpiValid = kpiScores.value.every(
+    s => s !== null && s !== undefined && s >= 0 && s <= 100
+  )
+  return dimsValid && (kpiItems.value.length === 0 || kpiValid)
 })
 
 onMounted(async () => {
@@ -188,27 +242,43 @@ onMounted(async () => {
       assessmentInfo.deadline = pendingItem.self_due_date
       assessmentInfo.recordId = pendingItem.record_id
       hasSubmitted.value = false
-      // 加载草稿
+
+      // 加载自评详情（含 KPI、维度权重、草稿）
       try {
-        const draftRes = await getManagerDraft(pendingItem.record_id)
-        if (draftRes.has_draft && draftRes.draft) {
-          const d = draftRes.draft
-          if (d.performance !== undefined && d.performance !== null) {
-            scoreForm.dimensionScores.performance = d.performance
+        const detail = await getSelfAssessmentData(pendingItem.record_id)
+        dimensionWeights.value = detail.dimension_weights || {}
+        reviewerWeights.value = detail.reviewer_weights || {}
+        kpiItems.value = detail.kpi_items || []
+        kpiScores.value = detail.kpi_scores?.map(s => s.self_score ? parseFloat(s.self_score) : null) || new Array(kpiItems.value.length).fill(null)
+
+        // 加载已有自评分数（如存在）
+        if (detail.self_scores && Object.keys(detail.self_scores).length > 0) {
+          scoreForm.dimensionScores.performance = detail.self_scores.performance ?? null
+          scoreForm.dimensionScores.ability = detail.self_scores.ability ?? null
+          scoreForm.dimensionScores.attitude = detail.self_scores.attitude ?? null
+        }
+
+        // 加载草稿
+        if (detail.draft) {
+          if (detail.draft.performance !== undefined && detail.draft.performance !== null) {
+            scoreForm.dimensionScores.performance = detail.draft.performance
           }
-          if (d.ability !== undefined && d.ability !== null) {
-            scoreForm.dimensionScores.ability = d.ability
+          if (detail.draft.ability !== undefined && detail.draft.ability !== null) {
+            scoreForm.dimensionScores.ability = detail.draft.ability
           }
-          if (d.attitude !== undefined && d.attitude !== null) {
-            scoreForm.dimensionScores.attitude = d.attitude
+          if (detail.draft.attitude !== undefined && detail.draft.attitude !== null) {
+            scoreForm.dimensionScores.attitude = detail.draft.attitude
+          }
+          if (detail.draft.kpi_scores && Array.isArray(detail.draft.kpi_scores)) {
+            kpiScores.value = detail.draft.kpi_scores.map(s => s !== null && s !== undefined ? parseFloat(s) : null)
           }
           ElMessage.info('已自动恢复上次保存的草稿')
         }
       } catch (e) {
-        console.warn('加载草稿失败:', e)
+        console.warn('加载自评详情失败:', e)
       }
     } else {
-      // 查找已提交自评的记录（pending_manager 或更后状态）
+      // 查找已提交自评的记录
       const submittedItem = items.find(i => i.status !== 'pending_self' && i.self_scores && Object.keys(i.self_scores).length > 0)
       if (submittedItem) {
         assessmentInfo.cycleName = submittedItem.cycle_name
@@ -242,10 +312,18 @@ async function handleSubmit() {
     return
   }
 
-  for (const dim of dimensions) {
+  for (const dim of dimensions.value) {
     const score = scoreForm.dimensionScores[dim.key]
     if (score === null || score === undefined || score < 0 || score > 100) {
       dimensionErrors[dim.key] = '请填写 0-100 之间的分数'
+      return
+    }
+  }
+
+  for (let i = 0; i < kpiItems.value.length; i++) {
+    const score = kpiScores.value[i]
+    if (score === null || score === undefined || score < 0 || score > 100) {
+      ElMessage.warning(`请为 KPI「${kpiItems.value[i].name}」填写 0-100 之间的分数`)
       return
     }
   }
@@ -262,14 +340,9 @@ async function handleSubmit() {
       performance: scoreForm.dimensionScores.performance,
       ability: scoreForm.dimensionScores.ability,
       attitude: scoreForm.dimensionScores.attitude,
+      kpi_scores: kpiScores.value,
     })
     ElMessage.success('自评提交成功')
-    // 提交成功后删除草稿
-    try {
-      await deleteManagerDraft(assessmentInfo.recordId)
-    } catch (e) {
-      console.warn('删除草稿失败:', e)
-    }
     router.push('/my-performance')
   } catch (error) {
     console.error('Submit failed:', error)
@@ -294,10 +367,15 @@ async function handleSaveDraft() {
   }
   savingDraft.value = true
   try {
-    await saveManagerDraft(assessmentInfo.recordId, {
-      performance: scoreForm.dimensionScores.performance,
-      ability: scoreForm.dimensionScores.ability,
-      attitude: scoreForm.dimensionScores.attitude,
+    await createScoreDraft({
+      record_id: assessmentInfo.recordId,
+      draft_type: 'self',
+      draft_data: {
+        performance: scoreForm.dimensionScores.performance,
+        ability: scoreForm.dimensionScores.ability,
+        attitude: scoreForm.dimensionScores.attitude,
+        kpi_scores: kpiScores.value,
+      },
     })
     ElMessage.success('草稿保存成功')
   } catch (error) {
@@ -380,7 +458,8 @@ async function handleSaveDraft() {
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.05);
 }
 
-.dimension-section h4 {
+.dimension-section h4,
+.kpi-section h4 {
   margin: 0 0 16px;
   font-size: 16px;
   color: #303133;
@@ -490,6 +569,48 @@ async function handleSaveDraft() {
 
 .score-unit {
   font-size: 14px;
+  color: #606266;
+}
+
+.kpi-section {
+  margin-bottom: 24px;
+}
+
+.kpi-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.kpi-item {
+  padding: 16px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+}
+
+.kpi-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.kpi-name {
+  font-weight: 600;
+  color: #303133;
+}
+
+.kpi-weight {
+  font-size: 12px;
+  color: #909399;
+  background: #f5f7fa;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.kpi-target {
+  font-size: 12px;
   color: #606266;
 }
 

@@ -6,7 +6,9 @@ from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import AppealRecord, AssessmentRecord, Employee, User
 
+from app.services.notification_service import create_notification
 from app.services.operation_logger import log_operation
+import json
 
 router = APIRouter()
 
@@ -124,6 +126,14 @@ def create_appeal(
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
 
+    # P6-05: 仅 published 状态允许申诉
+    if record.status != "published":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅已发布状态的考核记录可发起申诉")
+
+    # P6-05: 申诉理由长度校验
+    if len(reason) < 20 or len(reason) > 1000:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="申诉理由需在 20-1000 字之间")
+
     appeal = AppealRecord(
         record_id=record_id,
         employee_id=user.employee_id or user.id,
@@ -134,6 +144,27 @@ def create_appeal(
     db.add(appeal)
     db.commit()
     db.refresh(appeal)
+
+    # P6-05: 更新 AssessmentRecord 的 appeal_record JSON 字段
+    record.appeal_record = json.dumps({
+        "appeal_id": appeal.id,
+        "reason": reason,
+        "detail": detail,
+        "status": "pending",
+        "created_at": appeal.created_at.isoformat() if appeal.created_at else None,
+    }, ensure_ascii=False)
+    db.commit()
+
+    # P6-05: 通知 HR
+    hr_users = db.query(User).filter(User.role.in_(["hr", "admin"])).all()
+    for hr in hr_users:
+        create_notification(
+            db=db,
+            user_id=hr.id,
+            title="待处理申诉",
+            content=f"员工 {user.username} 对考核记录 #{record_id} 发起了申诉，请尽快复核。",
+            type="appeal_created",
+        )
 
     log_operation(
         db=db,
@@ -215,5 +246,89 @@ def review_appeal(
         "id": appeal.id,
         "status": appeal.status,
         "review_result": appeal.review_result,
+        "resolved_at": appeal.resolved_at.isoformat() if appeal.resolved_at else None,
+    }
+
+
+@router.post("/{appeal_id}/resolve")
+def resolve_appeal(
+    appeal_id: int,
+    req: dict,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr")),
+):
+    """申诉复核（维持原结果或调整等级）"""
+    appeal = db.query(AppealRecord).filter(AppealRecord.id == appeal_id).first()
+    if not appeal:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="申诉记录不存在")
+
+    record = db.query(AssessmentRecord).filter(AssessmentRecord.id == appeal.record_id).first()
+    if not record or record.status != "appealed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该记录当前不处于申诉状态")
+
+    resolution = req.get("resolution")
+    new_grade = req.get("new_grade")
+    comment = req.get("comment")
+
+    if resolution not in ("maintain", "adjust"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="resolution 必须是 maintain 或 adjust")
+
+    if resolution == "adjust" and not new_grade:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="adjust 时必须提供 new_grade")
+
+    from datetime import datetime
+
+    # 更新申诉记录
+    appeal.status = "resolved"
+    appeal.review_result = comment
+    appeal.reviewer_id = user.employee_id or user.id
+    appeal.resolved_at = datetime.utcnow()
+
+    # 更新考核记录状态回 published
+    record.status = "published"
+    if resolution == "adjust":
+        record.grade = new_grade
+        record.appeal_record = json.dumps({
+            "appeal_id": appeal.id,
+            "resolution": "adjust",
+            "new_grade": new_grade,
+            "comment": comment,
+            "resolved_at": appeal.resolved_at.isoformat() if appeal.resolved_at else None,
+        }, ensure_ascii=False)
+    else:
+        record.appeal_record = json.dumps({
+            "appeal_id": appeal.id,
+            "resolution": "maintain",
+            "comment": comment,
+            "resolved_at": appeal.resolved_at.isoformat() if appeal.resolved_at else None,
+        }, ensure_ascii=False)
+
+    db.commit()
+    db.refresh(appeal)
+
+    # 通知员工复核结果
+    create_notification(
+        db=db,
+        user_id=appeal.employee_id,
+        title="申诉复核结果",
+        content=f"您的申诉已复核，结果：{'维持原结果' if resolution == 'maintain' else '等级调整为 ' + new_grade}。",
+        type="appeal_resolved",
+    )
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="resolve_appeal",
+        target_type="appeal_record",
+        target_id=appeal_id,
+        old_value={"status": "appealed", "grade": record.grade if resolution == "adjust" else None},
+        new_value={"status": "published", "resolution": resolution, "grade": record.grade},
+    )
+
+    return {
+        "id": appeal.id,
+        "status": appeal.status,
+        "resolution": resolution,
+        "new_grade": record.grade if resolution == "adjust" else None,
         "resolved_at": appeal.resolved_at.isoformat() if appeal.resolved_at else None,
     }

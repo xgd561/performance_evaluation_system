@@ -104,6 +104,26 @@ class TestCycleCreate:
         assert resp.status_code == 422
         assert "结束日期不能早于开始日期" in resp.json()["message"]
 
+    def test_create_cycle_duplicate_name(self, client: TestClient, admin_token, db_session):
+        cycle = AssessmentCycle(
+            name="重复名称", type="monthly", start_date=date.today(), end_date=date.today() + timedelta(days=30),
+            status="not_started"
+        )
+        db_session.add(cycle)
+        db_session.commit()
+
+        payload = {
+            "name": "重复名称",
+            "type": "monthly",
+            "start_date": str(date.today()),
+            "end_date": str(date.today() + timedelta(days=30)),
+            "weights": {"self": 30, "manager": 50, "peer": 20},
+            "grade_rules": {"A": 90, "B": 80, "C": 60, "D": 0}
+        }
+        resp = client.post("/assessment-cycles", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 409
+        assert "已存在" in resp.json()["message"]
+
     def test_create_cycle_unauthorized(self, client: TestClient, employee_token):
         payload = {"name": "未授权", "type": "monthly", "start_date": str(date.today()), "end_date": str(date.today()), "weights": {"self": 30, "manager": 50, "peer": 20}, "grade_rules": {"A": 90}}
         resp = client.post("/assessment-cycles", json=payload, headers={"Authorization": f"Bearer {employee_token}"})
@@ -163,7 +183,7 @@ class TestCycleUpdate:
 
         payload = {"name": "尝试修改"}
         resp = client.put(f"/assessment-cycles/{cycle.id}", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
-        assert resp.status_code == 409
+        assert resp.status_code == 400
         assert resp.json()["message"] == "已发起的考核周期不可修改"
 
 
@@ -204,7 +224,7 @@ class TestCycleDelete:
         db_session.refresh(cycle)
 
         resp = client.delete(f"/assessment-cycles/{cycle.id}", headers={"Authorization": f"Bearer {admin_token}"})
-        assert resp.status_code == 409
+        assert resp.status_code == 400
         assert resp.json()["message"] == "该周期已包含考核数据，不可删除"
 
     def test_delete_cycle_not_found(self, client: TestClient, admin_token):
@@ -426,3 +446,170 @@ class TestCycleProgress:
     def test_cycle_progress_unauthorized(self, client: TestClient, employee_token):
         resp = client.get("/assessment-cycles/1/progress", headers={"Authorization": f"Bearer {employee_token}"})
         assert resp.status_code == 403
+
+
+class TestCycleDetail:
+    """Tests for GET /assessment-cycles/{cycle_id}"""
+
+    def test_get_cycle_detail_success(self, client: TestClient, admin_token, db_session):
+        cycle = AssessmentCycle(
+            name="详情周期", type="monthly", start_date=date.today(), end_date=date.today() + timedelta(days=30),
+            status="not_started"
+        )
+        db_session.add(cycle)
+        db_session.flush()
+        dept = Department(name="详情部", code="DETAIL")
+        db_session.add(dept)
+        db_session.flush()
+        pos = Position(name="详情岗", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+        emp = Employee(employee_no="DET001", name="详情员工", department_id=dept.id, position_id=pos.id)
+        db_session.add(emp)
+        db_session.flush()
+        ce = CycleEmployee(cycle_id=cycle.id, employee_id=emp.id)
+        db_session.add(ce)
+        db_session.commit()
+        db_session.refresh(cycle)
+
+        resp = client.get(f"/assessment-cycles/{cycle.id}", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == cycle.id
+        assert data["name"] == "详情周期"
+        assert data["type"] == "monthly"
+        assert data["status"] == "not_started"
+        assert "weights" in data
+        assert "grade_rules" in data
+        assert "departments" in data
+        assert len(data["departments"]) == 1
+        assert data["departments"][0]["name"] == "详情部"
+        assert data["departments"][0]["code"] == "DETAIL"
+
+    def test_get_cycle_detail_not_found(self, client: TestClient, admin_token):
+        resp = client.get("/assessment-cycles/99999", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 404
+
+    def test_get_cycle_detail_no_departments(self, client: TestClient, admin_token, db_session):
+        cycle = AssessmentCycle(
+            name="无部门周期", type="quarterly", start_date=date.today(), end_date=date.today() + timedelta(days=90),
+            status="not_started"
+        )
+        db_session.add(cycle)
+        db_session.commit()
+        db_session.refresh(cycle)
+
+        resp = client.get(f"/assessment-cycles/{cycle.id}", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["departments"] == []
+
+
+class TestCycleListFilters:
+    """Tests for GET /assessment-cycles with filtering and pagination"""
+
+    def test_list_cycles_filter_by_status(self, client: TestClient, admin_token, db_session):
+        c1 = AssessmentCycle(name="筛选-未开始", type="monthly", start_date=date.today(), end_date=date.today() + timedelta(days=30), status="not_started")
+        c2 = AssessmentCycle(name="筛选-已发布", type="monthly", start_date=date.today(), end_date=date.today() + timedelta(days=30), status="published")
+        db_session.add_all([c1, c2])
+        db_session.commit()
+
+        resp = client.get("/assessment-cycles?status=not_started", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        names = [c["name"] for c in data]
+        assert "筛选-未开始" in names
+        assert "筛选-已发布" not in names
+
+    def test_list_cycles_filter_by_type(self, client: TestClient, admin_token, db_session):
+        c1 = AssessmentCycle(name="月度周期", type="monthly", start_date=date.today(), end_date=date.today() + timedelta(days=30), status="not_started")
+        c2 = AssessmentCycle(name="季度周期", type="quarterly", start_date=date.today(), end_date=date.today() + timedelta(days=90), status="not_started")
+        db_session.add_all([c1, c2])
+        db_session.commit()
+
+        resp = client.get("/assessment-cycles?type=quarterly", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        names = [c["name"] for c in data]
+        assert "季度周期" in names
+        assert "月度周期" not in names
+
+    def test_list_cycles_pagination(self, client: TestClient, admin_token, db_session):
+        for i in range(5):
+            c = AssessmentCycle(
+                name=f"分页-{i}", type="monthly",
+                start_date=date.today(), end_date=date.today() + timedelta(days=30),
+                status="not_started"
+            )
+            db_session.add(c)
+        db_session.commit()
+
+        resp = client.get("/assessment-cycles?page=1&size=2", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "total" in data
+        assert "page" in data
+        assert "size" in data
+        assert "items" in data
+        assert data["total"] >= 5
+        assert data["page"] == 1
+        assert data["size"] == 2
+        assert len(data["items"]) == 2
+
+    def test_list_cycles_pagination_second_page(self, client: TestClient, admin_token, db_session):
+        for i in range(5):
+            c = AssessmentCycle(
+                name=f"分页2-{i}", type="monthly",
+                start_date=date.today(), end_date=date.today() + timedelta(days=30),
+                status="not_started"
+            )
+            db_session.add(c)
+        db_session.commit()
+
+        resp = client.get("/assessment-cycles?page=2&size=2", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["page"] == 2
+        assert len(data["items"]) == 2
+
+    def test_list_cycles_filter_by_date_range(self, client: TestClient, admin_token, db_session):
+        c1 = AssessmentCycle(
+            name="日期范围内", type="monthly",
+            start_date=date.today() + timedelta(days=5),
+            end_date=date.today() + timedelta(days=30),
+            status="not_started"
+        )
+        c2 = AssessmentCycle(
+            name="日期范围外", type="monthly",
+            start_date=date.today() + timedelta(days=100),
+            end_date=date.today() + timedelta(days=120),
+            status="not_started"
+        )
+        db_session.add_all([c1, c2])
+        db_session.commit()
+
+        from_date = str(date.today())
+        to_date = str(date.today() + timedelta(days=50))
+        resp = client.get(f"/assessment-cycles?start_date={from_date}&end_date={to_date}", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        names = [c["name"] for c in data]
+        assert "日期范围内" in names
+        assert "日期范围外" not in names
+
+    def test_list_cycles_no_filter(self, client: TestClient, admin_token, db_session):
+        c = AssessmentCycle(
+            name="无筛选", type="monthly",
+            start_date=date.today(), end_date=date.today() + timedelta(days=30),
+            status="not_started"
+        )
+        db_session.add(c)
+        db_session.commit()
+
+        resp = client.get("/assessment-cycles", headers={"Authorization": f"Bearer {admin_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        names = [c["name"] for c in data]
+        assert "无筛选" in names

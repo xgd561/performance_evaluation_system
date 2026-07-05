@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from app.database import init_db
-from app.routers import auth, employees, departments, cycles, kpi_templates, config, dashboard, appeals, scores, reports, approvals, interviews, peers, logs, health
+from app.routers import auth, employees, departments, cycles, kpi_templates, config, dashboard, appeals, scores, reports, approvals, interviews, peers, logs, health, notifications, score_drafts
 import app.models
 
 app = FastAPI(
@@ -21,8 +21,11 @@ app.add_middleware(
 )
 
 from app.utils.audit_logger import AuditLogMiddleware
+from app.core.exceptions import register_exception_handlers
 
 app.add_middleware(AuditLogMiddleware)
+
+register_exception_handlers(app)
 
 
 @app.exception_handler(HTTPException)
@@ -54,11 +57,14 @@ api_v1.include_router(kpi_templates.router, prefix="/kpi-templates", tags=["KPI�
 api_v1.include_router(config.router, prefix="/config", tags=["系统配置"])
 api_v1.include_router(appeals.router, prefix="/appeals", tags=["申诉管理"])
 api_v1.include_router(scores.router, prefix="/scores", tags=["评分管理"])
+api_v1.include_router(score_drafts.score_drafts_router, prefix="/score-drafts", tags=["评分草稿"])
 api_v1.include_router(approvals.router, prefix="/approvals", tags=["审批管理"])
 api_v1.include_router(interviews.router, prefix="/interviews", tags=["绩效面谈"])
+api_v1.include_router(interviews.record_router, prefix="/assessment-records", tags=["考核记录"])
 api_v1.include_router(reports.router, prefix="/reports", tags=["报表分析"])
 api_v1.include_router(peers.router, prefix="/peer-reviewers", tags=["协作评分"])
 api_v1.include_router(logs.router, prefix="/logs", tags=["操作日志"])
+api_v1.include_router(notifications.router, prefix="/notifications", tags=["通知消息"])
 api_v1.include_router(health.router, tags=["健康检查"])
 
 app.include_router(api_v1)
@@ -75,11 +81,14 @@ direct_api.include_router(config.router, prefix="/config", tags=["系统配置"]
 direct_api.include_router(dashboard.router, prefix="/dashboard", tags=["仪表盘"])
 direct_api.include_router(appeals.router, prefix="/appeals", tags=["申诉管理"])
 direct_api.include_router(scores.router, prefix="/scores", tags=["评分管理"])
+direct_api.include_router(score_drafts.score_drafts_router, prefix="/score-drafts", tags=["评分草稿"])
 direct_api.include_router(approvals.router, prefix="/approvals", tags=["审批管理"])
 direct_api.include_router(interviews.router, prefix="/interviews", tags=["绩效面谈"])
+direct_api.include_router(interviews.record_router, prefix="/assessment-records", tags=["考核记录"])
 direct_api.include_router(reports.router, prefix="/reports", tags=["报表分析"])
 direct_api.include_router(peers.router, prefix="/peer-reviewers", tags=["协作评分"])
 direct_api.include_router(logs.router, prefix="/logs", tags=["操作日志"])
+direct_api.include_router(notifications.router, prefix="/notifications", tags=["通知消息"])
 
 app.include_router(direct_api)
 
@@ -105,6 +114,12 @@ def _migrate_db():
             conn.execute(text("ALTER TABLE assessment_records ADD COLUMN peer_draft_scores TEXT"))
             conn.commit()
             print("[migrate] Added column peer_draft_scores to assessment_records")
+
+    if 'manager_submitted' not in columns:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE assessment_records ADD COLUMN manager_submitted BOOLEAN DEFAULT 0"))
+            conn.commit()
+            print("[migrate] Added column manager_submitted to assessment_records")
 
 
 @app.on_event("startup")

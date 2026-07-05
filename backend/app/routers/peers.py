@@ -5,7 +5,7 @@ import json
 from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import (
-    PeerReviewer, AssessmentRecord, AssessmentCycle, Employee, Department, Position, User
+    PeerReviewer, PeerReviewTask, AssessmentRecord, AssessmentCycle, Employee, Department, Position, User
 )
 
 router = APIRouter()
@@ -124,6 +124,25 @@ def assign_peer_reviewer(
     db.add(relation)
     db.commit()
     db.refresh(relation)
+
+    # 同时创建 PeerReviewTask，供 P4-13 / P4-14 使用
+    record = db.query(AssessmentRecord).filter(
+        AssessmentRecord.cycle_id == body.cycle_id,
+        AssessmentRecord.employee_id == body.employee_id
+    ).first()
+    if record:
+        existing_task = db.query(PeerReviewTask).filter(
+            PeerReviewTask.record_id == record.id,
+            PeerReviewTask.reviewer_id == body.peer_id,
+        ).first()
+        if not existing_task:
+            task = PeerReviewTask(
+                record_id=record.id,
+                reviewer_id=body.peer_id,
+                status="pending",
+            )
+            db.add(task)
+            db.commit()
 
     return {
         "id": relation.id,

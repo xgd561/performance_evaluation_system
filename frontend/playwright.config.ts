@@ -42,9 +42,9 @@ export default defineConfig({
     /* 失败时录制视频 */
     video: 'on-first-retry',
 
-    /* 慢动作模式：每个操作延迟 800ms，方便观察 */
+    /* 正常速度运行 */
     launchOptions: {
-      slowMo: 800,
+      slowMo: 0,
     },
   },
 

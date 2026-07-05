@@ -1,92 +1,156 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia } from 'pinia'
+import { nextTick } from 'vue'
 import ScoreSheetView from '@/views/score-sheet/ScoreSheetView.vue'
 
+const mockGetToReviewList = vi.fn()
+const mockSubmitManagerScore = vi.fn()
+const mockGetManagerDraft = vi.fn()
+const mockSaveManagerDraft = vi.fn()
+const mockDeleteManagerDraft = vi.fn()
+
 vi.mock('@/api/scores', () => ({
-  getScoreRecordDetail: vi.fn(() => Promise.resolve({
-    data: {
-      id: 1,
-      employee_name: '王员工',
-      employee_no: 'EMP001',
-      self_scores: { performance: 85, ability: 80, attitude: 90 },
-      self_facts: { performance: '完成了项目A', ability: '技术提升' },
-      kpi_items: [
-        { name: '代码质量', weight: 40, target: '95%', actual_score: 92 }
-      ],
-      dimensions: [
-        { key: 'performance', label: '工作业绩', weight: 40 },
-        { key: 'ability', label: '工作能力', weight: 35 },
-        { key: 'attitude', label: '工作态度', weight: 25 }
-      ],
-      status: 'pending_manager'
-    }
-  })),
-  saveDraft: vi.fn(() => Promise.resolve({ data: { success: true } })),
-  submitManagerScore: vi.fn(() => Promise.resolve({ data: { success: true } }))
+  getToReviewList: (...args) => mockGetToReviewList(...args),
+  submitManagerScore: (...args) => mockSubmitManagerScore(...args),
+  getManagerDraft: (...args) => mockGetManagerDraft(...args),
+  saveManagerDraft: (...args) => mockSaveManagerDraft(...args),
+  deleteManagerDraft: (...args) => mockDeleteManagerDraft(...args),
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    user: { role: 'manager', name: '张经理' },
+  }),
+}))
+
+vi.mock('element-plus', async () => {
+  const actual = await vi.importActual('element-plus')
+  return {
+    ...actual,
+    ElMessage: {
+      success: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      warning: vi.fn(),
+    },
+    ElMessageBox: {
+      confirm: vi.fn().mockResolvedValue(true),
+    },
+  }
+})
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
 }))
 
 describe('ScoreSheetView.vue', () => {
-  it('加载时显示员工自评参考', async () => {
-    const wrapper = mount(ScoreSheetView, {
-      global: { plugins: [createPinia()] }
-    })
+  const mockRecord = {
+    record_id: 1,
+    employee_name: '王员工',
+    employee_no: 'EMP001',
+    department_name: '研发部',
+    position_name: '工程师',
+    cycle_name: '2024 Q1',
+    manager_due_date: '2024-04-15T23:59:59',
+    status: 'pending_manager',
+    self_scores: { performance: 85, ability: 80, attitude: 90 },
+    kpi_snapshot: {
+      items: [
+        { name: '代码质量', weight: 40, target: '95%', self_score: 88 },
+      ],
+    },
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGetToReviewList.mockResolvedValue([mockRecord])
+    mockGetManagerDraft.mockResolvedValue({ has_draft: false, draft: null })
+  })
+
+  it('renders employee info and score inputs', async () => {
+    const wrapper = mount(ScoreSheetView)
     await flushPromises()
+    await nextTick()
 
     expect(wrapper.text()).toContain('王员工')
+    expect(wrapper.text()).toContain('研发部')
+    expect(wrapper.text()).toContain('工程师')
+
+    const labels = wrapper.findAll('.dim-name')
+    const labelTexts = labels.map(l => l.text())
+    expect(labelTexts).toContain('工作业绩')
+    expect(labelTexts).toContain('工作能力')
+    expect(labelTexts).toContain('工作态度')
+  })
+
+  it('loads self-assessment reference scores', async () => {
+    const wrapper = mount(ScoreSheetView)
+    await flushPromises()
+    await nextTick()
+
     expect(wrapper.text()).toContain('员工自评参考')
     expect(wrapper.text()).toContain('85')
     expect(wrapper.text()).toContain('80')
     expect(wrapper.text()).toContain('90')
   })
 
-  it('评语少于 20 字时提交拦截', async () => {
-    const wrapper = mount(ScoreSheetView, {
-      global: { plugins: [createPinia()] }
-    })
+  it('submits manager scores with comment', async () => {
+    const wrapper = mount(ScoreSheetView)
+    await flushPromises()
+    await nextTick()
+
+    wrapper.vm.scoreForm.dimensionScores.performance = 88
+    wrapper.vm.scoreForm.dimensionScores.ability = 82
+    wrapper.vm.scoreForm.dimensionScores.attitude = 85
+    wrapper.vm.scoreForm.comment = '该员工表现优秀，完成了所有KPI指标，值得肯定。'
+    await nextTick()
+
+    await wrapper.vm.handleSubmit()
     await flushPromises()
 
-    const comment = wrapper.find('textarea')
-    if (comment.exists()) {
-      await comment.setValue('太短')
-      await comment.trigger('blur')
-      await flushPromises()
-      expect(wrapper.text()).toContain('不少于 20 字') || expect(wrapper.text()).toContain('20')
-    }
+    expect(mockSubmitManagerScore).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        performance: 88,
+        ability: 82,
+        attitude: 85,
+        comment: '该员工表现优秀，完成了所有KPI指标，值得肯定。',
+      })
+    )
   })
 
-  it('评分差异大于 20 分时弹出确认框', async () => {
-    const wrapper = mount(ScoreSheetView, {
-      global: { plugins: [createPinia()] }
-    })
+  it('validates comment length (>=20 chars)', async () => {
+    const wrapper = mount(ScoreSheetView)
     await flushPromises()
+    await nextTick()
 
-    const inputs = wrapper.findAll('.score-input input')
-    if (inputs.length >= 3) {
-      await inputs[0].setValue('10')  // 与自评 85 差异 75
-      await inputs[1].setValue('82')
-      await inputs[2].setValue('85')
+    wrapper.vm.scoreForm.dimensionScores.performance = 88
+    wrapper.vm.scoreForm.dimensionScores.ability = 82
+    wrapper.vm.scoreForm.dimensionScores.attitude = 85
+    wrapper.vm.scoreForm.comment = '太短'
+    await nextTick()
 
-      const submitBtn = wrapper.find('button:has-text("提交评分")')
-      if (submitBtn.exists()) {
-        await submitBtn.trigger('click')
-        await flushPromises()
-        expect(wrapper.text()).toContain('差异') || expect(wrapper.text()).toContain('确认')
-      }
-    }
+    expect(wrapper.vm.canSubmit).toBe(false)
   })
 
-  it('保存草稿功能正常', async () => {
-    const wrapper = mount(ScoreSheetView, {
-      global: { plugins: [createPinia()] }
-    })
+  it('shows alert when self/manager score diff > 20', async () => {
+    const wrapper = mount(ScoreSheetView)
     await flushPromises()
+    await nextTick()
 
-    const saveBtn = wrapper.find('button:has-text("保存草稿")')
-    if (saveBtn.exists()) {
-      await saveBtn.trigger('click')
-      await flushPromises()
-      expect(wrapper.text()).toContain('草稿') || expect(wrapper.text()).toContain('已保存')
-    }
+    // Self score is 85, manager gives 10 -> diff 75 > 20
+    wrapper.vm.scoreForm.dimensionScores.performance = 10
+    wrapper.vm.scoreForm.dimensionScores.ability = 82
+    wrapper.vm.scoreForm.dimensionScores.attitude = 85
+    wrapper.vm.scoreForm.comment = '该员工表现一般，需要改进工作方法和效率。'
+    await nextTick()
+
+    await wrapper.vm.handleSubmit()
+    await nextTick()
+
+    expect(wrapper.vm.diffDialogVisible).toBe(true)
+    expect(wrapper.vm.diffDimension).toBe('工作业绩')
+    expect(wrapper.vm.diffScore).toBe(10)
+    expect(wrapper.vm.diffSelfScore).toBe(85)
   })
 })

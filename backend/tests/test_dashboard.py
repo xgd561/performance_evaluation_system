@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from app.models import AssessmentCycle, Employee, Department, Position, ApprovalRecord, AppealRecord
+from app.models import AssessmentCycle, Employee, Department, Position, ApprovalRecord, AppealRecord, AssessmentRecord
 from datetime import date, timedelta
 
 
@@ -43,6 +43,28 @@ class TestDashboardMain:
         assert resp.status_code == 401
 
 
+    def test_dashboard_hr_returns_expected_fields(self, client: TestClient, hr_token, db_session):
+        """HR 仪表盘应返回 cycle_count、to_summary、to_approve、to_archive、pending_appeals、force_distribution_exceeded"""
+        from app.models import AssessmentRecord, AppealRecord
+        cycle = AssessmentCycle(
+            name="HR仪表盘周期", type="monthly", start_date=date.today(), end_date=date.today() + timedelta(days=30)
+        )
+        db_session.add(cycle)
+        db_session.commit()
+
+        resp = client.get("/dashboard", headers={"Authorization": f"Bearer {hr_token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "stats" in data
+        stats = data["stats"]
+        assert "cycle_count" in stats
+        assert "to_summary" in stats
+        assert "to_approve" in stats
+        assert "to_archive" in stats
+        assert "pending_appeals" in stats
+        assert "force_distribution_exceeded" in stats
+
+
 class TestDashboardCycles:
     """Tests for GET /dashboard/cycles"""
 
@@ -77,7 +99,15 @@ class TestDashboardApprovals:
         emp = Employee(employee_no="APP001", name="审批人", department_id=dept.id, position_id=pos.id)
         db_session.add(emp)
         db_session.flush()
-        app = ApprovalRecord(record_id=1, approver_id=emp.id, step_index=1)
+        cycle = AssessmentCycle(
+            name="审批周期", type="monthly", start_date=date.today(), end_date=date.today() + timedelta(days=30)
+        )
+        db_session.add(cycle)
+        db_session.flush()
+        record = AssessmentRecord(cycle_id=cycle.id, employee_id=emp.id, status="pending_approval")
+        db_session.add(record)
+        db_session.flush()
+        app = ApprovalRecord(record_id=record.id, approver_id=emp.id, step_index=1)
         db_session.add(app)
         db_session.commit()
 

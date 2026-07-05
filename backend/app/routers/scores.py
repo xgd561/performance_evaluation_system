@@ -1,19 +1,29 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from datetime import datetime
 import json
 
 from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import (
-    AssessmentRecord, AssessmentCycle, Employee, Department, Position, ScoreDetail, User, PeerReviewer, AppealRecord, InterviewRecord
+    AssessmentRecord, AssessmentCycle, Employee, Department, Position, ScoreDetail, User, PeerReviewer, AppealRecord, InterviewRecord, Notification, ScoreDraft, PeerReviewTask
 )
 
 from app.services.operation_logger import log_operation
 from app.services.distribution_enforcer import enforce_distribution
+from app.services.score_calculator import calculate_weighted_score, calculate_kpi_weighted_performance
+from app.services.notification_service import create_notification
+from app.utils.workflow_state_machine import WorkflowStateMachine
 from app.routers.employees import _is_in_subordinate_chain, get_all_dept_ids
 
 router = APIRouter()
+
+
+def _get_subordinate_ids(db, current_employee):
+    """获取当前经理的所有下属员工ID列表"""
+    subordinate_ids = db.query(Employee.id).filter(Employee.manager_id == current_employee.id).all()
+    return [sid[0] for sid in subordinate_ids]
 
 
 def _ensure_score_details(db, record):
@@ -165,7 +175,52 @@ def calculate_scores(
     reviewer_weights = json.loads(cycle.reviewer_weights)
     grade_rules = json.loads(cycle.grade_rules)
 
+    # 1. Weight validation
+    dim_sum = sum(dim_weights.values()) if isinstance(dim_weights, dict) else 0.0
+    if abs(dim_sum - 1.0) > 0.01 and abs(dim_sum - 100.0) > 0.01:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"维度权重之和必须为100%或1.0，当前为{dim_sum}",
+        )
+
+    # reviewer_weights is per-dimension, validate each dimension sums to 1.0 or 100.0
+    if isinstance(reviewer_weights, dict):
+        for dim, rw in reviewer_weights.items():
+            if isinstance(rw, dict):
+                rw_sum = sum(rw.values())
+                if abs(rw_sum - 1.0) > 0.01 and abs(rw_sum - 100.0) > 0.01:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"评分人权重维度 '{dim}' 之和必须为100%或1.0，当前为{rw_sum}",
+                    )
+
     records = db.query(AssessmentRecord).filter(AssessmentRecord.cycle_id == cycle_id).all()
+
+    # 2. Completion check
+    incomplete = []
+    for r in records:
+        if not r.self_scores or r.self_scores == "{}" or r.self_scores == "":
+            incomplete.append({"record_id": r.id, "reason": "缺少自评分"})
+        if not r.manager_scores or r.manager_scores == "{}" or r.manager_scores == "":
+            incomplete.append({"record_id": r.id, "reason": "缺少上级评分"})
+
+    if cycle.peer_review_enabled:
+        peer_tasks = db.query(PeerReviewTask).filter(
+            PeerReviewTask.record_id.in_([r.id for r in records])
+        ).all()
+        task_map = {}
+        for t in peer_tasks:
+            task_map.setdefault(t.record_id, []).append(t)
+        for r in records:
+            tasks = task_map.get(r.id, [])
+            if tasks and any(t.status != "completed" for t in tasks):
+                incomplete.append({"record_id": r.id, "reason": "协作评分未完成"})
+
+    if incomplete:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"存在未完成的评分记录: {incomplete}",
+        )
 
     def _map_grade(total):
         for grade, rule in grade_rules.items():
@@ -184,40 +239,22 @@ def calculate_scores(
         # 如有 KPI 评分，按权重加权计算 performance 维度
         self_kpi_perf = _get_kpi_weighted_performance(db, r.id, "self")
         manager_kpi_perf = _get_kpi_weighted_performance(db, r.id, "manager")
-        if self_kpi_perf is not None:
-            self_scores["performance"] = self_kpi_perf
-        if manager_kpi_perf is not None:
-            manager_scores["performance"] = manager_kpi_perf
 
-        weighted_dims = {}
-        for dim, dim_weight in dim_weights.items():
-            scores = {
-                "self": self_scores.get(dim),
-                "manager": manager_scores.get(dim),
-                "peer": peer_scores.get(dim),
-            }
-            rw = reviewer_weights.get(dim, reviewer_weights)
-            if not rw and any(r in reviewer_weights for r in ["self", "manager", "peer"]):
-                rw = reviewer_weights
-            total_w = 0
-            weighted_sum = 0
-            for reviewer, score in scores.items():
-                if score is not None and reviewer in rw:
-                    weighted_sum += score * rw[reviewer]
-                    total_w += rw[reviewer]
-            if total_w > 0:
-                weighted_sum = weighted_sum / total_w
-            weighted_dims[dim] = round(weighted_sum, 1)
+        result = calculate_weighted_score(
+            self_scores=json.loads(r.self_scores) if r.self_scores else {},
+            manager_scores=json.loads(r.manager_scores) if r.manager_scores else {},
+            peer_scores=json.loads(r.peer_scores) if r.peer_scores else {},
+            dim_weights=dim_weights,
+            reviewer_weights=reviewer_weights,
+            kpi_weighted_self_performance=self_kpi_perf,
+            kpi_weighted_manager_performance=manager_kpi_perf,
+        )
 
-        dim_weight_factor = 100.0 if sum(dim_weights.values()) > 1 else 1.0
-        total = sum(weighted_dims.get(d, 0) * (dim_weights.get(d, 0) / dim_weight_factor) for d in dim_weights)
-        total = round(total, 1)
-
-        r.weighted_performance = weighted_dims.get("performance", 0)
-        r.weighted_ability = weighted_dims.get("ability", 0)
-        r.weighted_attitude = weighted_dims.get("attitude", 0)
-        r.total_score = total
-        r.grade = _map_grade(total)
+        r.weighted_performance = result["weighted_performance"]
+        r.weighted_ability = result["weighted_ability"]
+        r.weighted_attitude = result["weighted_attitude"]
+        r.total_score = result["total_score"]
+        r.grade = _map_grade(result["total_score"])
         r.original_grade = r.grade
         r.status = "pending_summary"
 
@@ -243,11 +280,51 @@ def calculate_scores(
 
     db.commit()
 
+    # Build a set of employee IDs that have adjustments or override candidates
+    adjusted_employee_ids = set()
+    for log in all_adjustment_logs:
+        adjusted_employee_ids.add(log["employee_id"])
+    for cand in all_override_candidates:
+        adjusted_employee_ids.add(cand["employee_id"])
+
+    # 4. State machine transition
+    pending_distribution_review_count = 0
+    pending_approval_count = 0
+    for r in records:
+        is_distribution_triggered = (
+            r.grade != r.original_grade
+            or r.is_distribution_override
+            or r.employee_id in adjusted_employee_ids
+        )
+        new_status = WorkflowStateMachine.transition(
+            current_state="pending_summary",
+            action="trigger_summary",
+            is_distribution_triggered=is_distribution_triggered,
+            db=db,
+            user_id=user.id,
+            target_id=r.id,
+            target_type="assessment_record",
+        )
+        r.status = new_status
+        if new_status == "pending_distribution_review":
+            pending_distribution_review_count += 1
+        elif new_status == "pending_approval":
+            pending_approval_count += 1
+
+    db.commit()
+
+    # 5. Abnormal count
+    abnormal_count = sum(
+        1 for r in records
+        if r.total_score is not None and (float(r.total_score) < 60 or float(r.total_score) > 98)
+    )
+
     return {
         "calculated": len(records),
-        "status": "pending_summary",
-        "adjustment_count": len(all_adjustment_logs),
-        "override_candidates": len(all_override_candidates),
+        "abnormal_count": abnormal_count,
+        "pending_distribution_review_count": pending_distribution_review_count,
+        "pending_approval_count": pending_approval_count,
+        "status": "completed",
     }
 
 
@@ -267,30 +344,51 @@ class ManagerScoreSubmit(BaseModel):
 
 @router.get("/to-review")
 def get_to_review_list(
+    status: str = None,
+    department_id: int = None,
+    keyword: str = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_role("manager", "admin", "hr")),
 ):
-    """获取当前用户的待评列表（上级评）"""
+    """获取当前用户的待评列表（上级评），支持状态、部门、关键词筛选"""
     current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
     if not current_employee:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工信息不存在")
 
     # 查询当前用户是直属上级的员工
-    subordinate_ids = db.query(Employee.id).filter(Employee.manager_id == current_employee.id).all()
-    subordinate_ids = [sid[0] for sid in subordinate_ids]
+    subordinate_ids = _get_subordinate_ids(db, current_employee)
 
     if not subordinate_ids:
         return []
 
-    # 查询待上级评分的记录：状态为 pending_manager
-    records = db.query(AssessmentRecord).filter(
-        AssessmentRecord.employee_id.in_(subordinate_ids),
-        AssessmentRecord.status == "pending_manager"
-    ).all()
+    # 查询下属考核记录
+    query = db.query(AssessmentRecord).filter(AssessmentRecord.employee_id.in_(subordinate_ids))
+
+    # 状态筛选：默认 pending_manager，可选 pending_peer / pending_summary
+    if status:
+        query = query.filter(AssessmentRecord.status == status)
+    else:
+        query = query.filter(AssessmentRecord.status == "pending_manager")
+
+    if department_id:
+        query = query.filter(AssessmentRecord.department_id == department_id)
+
+    records = query.order_by(AssessmentRecord.created_at.desc()).all()
 
     result = []
     for r in records:
         emp = db.query(Employee).filter(Employee.id == r.employee_id).first()
+        if not emp:
+            continue
+
+        # 关键词筛选（姓名/工号）
+        if keyword:
+            kw = keyword.lower()
+            name_match = emp.name and kw in emp.name.lower()
+            no_match = emp.employee_no and kw in emp.employee_no.lower()
+            if not name_match and not no_match:
+                continue
+
         dept = db.query(Department).filter(Department.id == r.department_id).first()
         pos = db.query(Position).filter(Position.id == r.position_id).first()
         cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == r.cycle_id).first()
@@ -305,18 +403,29 @@ def get_to_review_list(
             "employee_id": r.employee_id,
             "employee_name": emp.name if emp else None,
             "employee_no": emp.employee_no if emp else None,
+            "department_id": r.department_id,
             "department_name": dept.name if dept else None,
             "position_name": pos.name if pos else None,
             "status": r.status,
             "self_scores": self_scores,
             "kpi_snapshot": kpi_snapshot,
             "manager_due_date": str(cycle.manager_due_date) if cycle and cycle.manager_due_date else None,
-            "test_reload": "yes",
-            "test_field": "hello",
             "created_at": r.created_at.isoformat() if r.created_at else None,
         })
 
     return result
+
+
+@router.get("/manager/score-list")
+def get_manager_score_list(
+    status: str = None,
+    department_id: int = None,
+    keyword: str = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("manager", "admin", "hr")),
+):
+    """P4-06: 上级评分列表接口（与 to-review 同逻辑，支持更广泛的状态筛选）"""
+    return get_to_review_list(status=status, department_id=department_id, keyword=keyword, db=db, user=user)
 
 
 @router.post("/manager/{record_id}")
@@ -374,16 +483,52 @@ def submit_manager_score(
     old_status = record.status
     record.manager_scores = json.dumps(manager_scores)
     record.manager_comment = body.comment
+    record.manager_submitted = True
 
     # 根据周期配置决定是否进入协作评分阶段
     cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == record.cycle_id).first()
-    if cycle and cycle.peer_review_enabled is False:
-        record.status = "pending_summary"
-    else:
-        record.status = "pending_peer"
+    peer_review_enabled = not (cycle and cycle.peer_review_enabled is False)
+    record.status = WorkflowStateMachine.transition(
+        current_state=old_status,
+        action="submit_manager",
+        db=db,
+        user_id=user.id,
+        target_id=record_id,
+        target_type="assessment_record",
+        peer_review_enabled=peer_review_enabled,
+    )
+    if peer_review_enabled:
+        # 创建协作评分任务（PeerReviewTask）
+        peer_reviewers = db.query(PeerReviewer).filter(
+            PeerReviewer.cycle_id == record.cycle_id,
+            PeerReviewer.employee_id == record.employee_id,
+        ).all()
+        for pr in peer_reviewers:
+            existing_task = db.query(PeerReviewTask).filter(
+                PeerReviewTask.record_id == record.id,
+                PeerReviewTask.reviewer_id == pr.reviewer_id,
+            ).first()
+            if not existing_task:
+                task = PeerReviewTask(
+                    record_id=record.id,
+                    reviewer_id=pr.reviewer_id,
+                    status="pending",
+                )
+                db.add(task)
 
     db.commit()
     db.refresh(record)
+
+    # 发送通知给被评员工
+    emp_user = db.query(User).filter(User.employee_id == record.employee_id).first()
+    if emp_user:
+        create_notification(
+            db=db,
+            user_id=emp_user.id,
+            title="上级评分已完成",
+            content=f"您的上级已完成评分，当前状态：{record.status}。",
+            type="manager_score",
+        )
 
     log_operation(
         db=db,
@@ -474,9 +619,9 @@ class SelfScoreSubmit(BaseModel):
 @router.get("/my-assessment")
 def get_my_assessment(
     db: Session = Depends(get_db),
-    user: User = Depends(require_role("employee")),
+    user: User = Depends(require_role("employee", "manager")),
 ):
-    """获取当前员工的考核记录列表"""
+    """获取当前员工的考核记录列表（P6-01：我的绩效）"""
     current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
     if not current_employee:
         return {"items": [], "total": 0}
@@ -488,8 +633,6 @@ def get_my_assessment(
     result = []
     for r in records:
         cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == r.cycle_id).first()
-        # P1-18: 员工只能查看已发布/已归档的考核结果
-        # 但员工始终有权查看自己提交的自评分数（self_scores），只隐藏上级/协作评和最终分数
         is_published = r.status in ["published", "archived"]
         self_scores = json.loads(r.self_scores) if r.self_scores else {}
         if user.role == "employee" and not is_published:
@@ -502,6 +645,11 @@ def get_my_assessment(
             grade = None
             original_grade = None
             manager_comment = None
+            kpi_details = []
+            is_distribution_override = None
+            override_reason = None
+            appeal = None
+            published_at = None
         else:
             manager_scores = json.loads(r.manager_scores) if r.manager_scores else {}
             peer_scores = json.loads(r.peer_scores) if r.peer_scores else {}
@@ -512,6 +660,34 @@ def get_my_assessment(
             grade = r.grade
             original_grade = r.original_grade
             manager_comment = r.manager_comment
+            # KPI 明细
+            kpi_details = []
+            score_details = db.query(ScoreDetail).filter(ScoreDetail.record_id == r.id).order_by(ScoreDetail.id).all()
+            for d in score_details:
+                kpi_details.append({
+                    "kpi_name": d.kpi_name,
+                    "weight": str(d.weight) if d.weight else None,
+                    "target_value": d.target_value,
+                    "self_score": str(d.self_score) if d.self_score else None,
+                    "manager_score": str(d.manager_score) if d.manager_score else None,
+                })
+            is_distribution_override = r.is_distribution_override
+            override_reason = r.override_reason
+            # 申诉状态
+            appeal_record = db.query(AppealRecord).filter(AppealRecord.record_id == r.id).first()
+            if appeal_record:
+                appeal = {
+                    "id": appeal_record.id,
+                    "reason": appeal_record.reason,
+                    "detail": appeal_record.detail,
+                    "status": appeal_record.status,
+                    "review_result": appeal_record.review_result,
+                    "resolved_at": appeal_record.resolved_at.isoformat() if appeal_record.resolved_at else None,
+                    "created_at": appeal_record.created_at.isoformat() if appeal_record.created_at else None,
+                }
+            else:
+                appeal = None
+            published_at = r.updated_at.isoformat() if r.updated_at else None
 
         result.append({
             "record_id": r.id,
@@ -533,6 +709,11 @@ def get_my_assessment(
             "original_grade": original_grade,
             "status": r.status,
             "manager_comment": manager_comment,
+            "kpi_details": kpi_details,
+            "is_distribution_override": is_distribution_override,
+            "override_reason": override_reason,
+            "appeal": appeal,
+            "published_at": published_at,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         })
 
@@ -576,20 +757,18 @@ def submit_self_score(
 
     old_status = record.status
     record.self_scores = json.dumps(self_scores)
-    record.status = "pending_manager"
+    # 使用状态机执行转换: pending_self -> submit_self -> pending_manager
+    record.status = WorkflowStateMachine.transition(
+        current_state=old_status,
+        action="submit_self",
+        db=db,
+        user_id=user.id,
+        target_id=record_id,
+        target_type="assessment_record",
+    )
 
     db.commit()
     db.refresh(record)
-
-    log_operation(
-        db=db,
-        user_id=user.id,
-        action="self_score_submit",
-        target_type="assessment_record",
-        target_id=record_id,
-        old_value={"status": old_status},
-        new_value={"status": record.status, "self_scores": self_scores},
-    )
 
     return {
         "record_id": record_id,
@@ -920,4 +1099,289 @@ def get_assessment_record_detail(
         "appeal": appeal_info,
         "interview": interview_info,
         "created_at": record.created_at.isoformat() if record.created_at else None,
+    }
+
+
+@router.get("/self/{record_id}")
+def get_self_assessment_data(
+    record_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("employee")),
+):
+    """加载自评数据：KPI快照、已有自评分、草稿、周期信息"""
+    record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    if record.employee_id != user.employee_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看此考核记录")
+
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == record.cycle_id).first()
+    emp = db.query(Employee).filter(Employee.id == record.employee_id).first()
+    dept = db.query(Department).filter(Department.id == record.department_id).first()
+    pos = db.query(Position).filter(Position.id == record.position_id).first()
+
+    kpi_snapshot = json.loads(record.kpi_snapshot) if record.kpi_snapshot else []
+    if isinstance(kpi_snapshot, dict):
+        kpi_items = kpi_snapshot.get("items", [])
+    else:
+        kpi_items = kpi_snapshot
+
+    self_scores = json.loads(record.self_scores) if record.self_scores else {}
+
+    # 从 score_drafts 表读取 self 草稿
+    from app.models import ScoreDraft
+    draft = db.query(ScoreDraft).filter(
+        ScoreDraft.record_id == record_id,
+        ScoreDraft.draft_type == "self",
+    ).order_by(ScoreDraft.updated_at.desc()).first()
+    draft_data = draft.draft_data if draft else None
+
+    # 计算已存在的 KPI 自评分
+    score_details = db.query(ScoreDetail).filter(ScoreDetail.record_id == record_id).order_by(ScoreDetail.id).all()
+    kpi_scores = []
+    for d in score_details:
+        kpi_scores.append({
+            "kpi_name": d.kpi_name,
+            "weight": str(d.weight) if d.weight else None,
+            "target_value": d.target_value,
+            "self_score": str(d.self_score) if d.self_score else None,
+        })
+
+    return {
+        "record_id": record.id,
+        "cycle_id": record.cycle_id,
+        "cycle_name": cycle.name if cycle else None,
+        "cycle_type": cycle.type if cycle else None,
+        "cycle_status": cycle.status if cycle else None,
+        "self_due_date": str(cycle.self_due_date) if cycle and cycle.self_due_date else None,
+        "employee_id": record.employee_id,
+        "employee_name": emp.name if emp else None,
+        "employee_no": emp.employee_no if emp else None,
+        "department_name": dept.name if dept else None,
+        "position_name": pos.name if pos else None,
+        "status": record.status,
+        "kpi_items": kpi_items,
+        "kpi_scores": kpi_scores,
+        "self_scores": self_scores,
+        "draft": draft_data,
+        "has_draft": draft_data is not None,
+        "dimension_weights": json.loads(cycle.dimension_weights) if cycle and cycle.dimension_weights else None,
+        "reviewer_weights": json.loads(cycle.reviewer_weights) if cycle and cycle.reviewer_weights else None,
+    }
+
+
+
+# ── P4-13: 协作人待评列表（基于 PeerReviewTask） ──
+
+@router.get("/peer/review-list")
+def get_peer_review_list(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("peer")),
+):
+    """P4-13: 查询当前协作人的待评列表（基于 PeerReviewTask）"""
+    current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
+    if not current_employee:
+        return {"items": [], "total": 0}
+
+    tasks = db.query(PeerReviewTask).filter(
+        PeerReviewTask.reviewer_id == current_employee.id,
+    ).order_by(PeerReviewTask.created_at.desc()).all()
+
+    result = []
+    for task in tasks:
+        record = db.query(AssessmentRecord).filter(AssessmentRecord.id == task.record_id).first()
+        if not record:
+            continue
+
+        emp = db.query(Employee).filter(Employee.id == record.employee_id).first()
+        dept = db.query(Department).filter(Department.id == record.department_id).first()
+        pos = db.query(Position).filter(Position.id == record.position_id).first()
+        cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == record.cycle_id).first()
+
+        result.append({
+            "task_id": task.id,
+            "record_id": record.id,
+            "cycle_id": record.cycle_id,
+            "cycle_name": cycle.name if cycle else None,
+            "employee_id": record.employee_id,
+            "employee_name": emp.name if emp else None,
+            "employee_no": emp.employee_no if emp else None,
+            "department_name": dept.name if dept else None,
+            "position_name": pos.name if pos else None,
+            "status": task.status,
+            "ability_score": str(task.ability_score) if task.ability_score else None,
+            "comment": task.comment,
+            "submitted_at": task.submitted_at.isoformat() if task.submitted_at else None,
+            "peer_due_date": str(cycle.peer_due_date) if cycle and cycle.peer_due_date else None,
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "self_scores": json.loads(record.self_scores) if record.self_scores else {},
+            "manager_scores": json.loads(record.manager_scores) if record.manager_scores else {},
+            "peer_scores": json.loads(record.peer_scores) if record.peer_scores else {},
+        })
+
+    return {"items": result, "total": len(result)}
+
+
+class PeerReviewTaskSubmit(BaseModel):
+    ability: float
+    comment: str
+
+
+@router.post("/peer/review-tasks/{task_id}/submit")
+def submit_peer_review_task(
+    task_id: int,
+    body: PeerReviewTaskSubmit,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("peer")),
+):
+    """P4-14: 协作评分提交（基于 PeerReviewTask）"""
+    task = db.query(PeerReviewTask).filter(PeerReviewTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="协作评分任务不存在")
+
+    current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
+    if not current_employee:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工信息不存在")
+
+    # 权限校验：必须是当前用户自己的任务
+    if task.reviewer_id != current_employee.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作此协作评分任务")
+
+    # 状态校验
+    if task.status != "pending":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="当前任务已提交，不可重复评分")
+
+    # 分数校验
+    if body.ability < 0 or body.ability > 100:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="能力分数需在0-100之间")
+
+    # 评语校验：不少于20字，不超过500字
+    if not body.comment or len(body.comment.strip()) < 20:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="协作评语不少于20字")
+    if len(body.comment) > 500:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="协作评语不超过500字")
+
+    # 更新任务
+    task.ability_score = body.ability
+    task.comment = body.comment
+    task.status = "completed"
+    task.submitted_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(task)
+
+    # 更新考核记录的 peer_scores
+    record = db.query(AssessmentRecord).filter(AssessmentRecord.id == task.record_id).first()
+    emp = db.query(Employee).filter(Employee.id == record.employee_id).first() if record else None
+    if record:
+        peer_scores = json.loads(record.peer_scores) if record.peer_scores else {}
+        # 如果有多位协作人，取平均值
+        all_peer_tasks = db.query(PeerReviewTask).filter(
+            PeerReviewTask.record_id == record.id,
+            PeerReviewTask.status == "completed",
+        ).all()
+        completed_scores = [float(t.ability_score) for t in all_peer_tasks if t.ability_score is not None]
+        if completed_scores:
+            peer_scores["ability"] = round(sum(completed_scores) / len(completed_scores), 1)
+        record.peer_scores = json.dumps(peer_scores)
+        db.commit()
+        db.refresh(record)
+
+        # 检查是否所有协作任务均已完成
+        all_tasks = db.query(PeerReviewTask).filter(PeerReviewTask.record_id == record.id).all()
+        if all(t.status == "completed" for t in all_tasks):
+            record.status = WorkflowStateMachine.transition(
+                current_state=record.status,
+                action="complete_peer",
+                db=db,
+                user_id=user.id,
+                target_id=record.id,
+                target_type="assessment_record",
+            )
+            db.commit()
+
+            # 通知 HR
+            hr_users = db.query(User).filter(User.role == "hr").all()
+            for hr in hr_users:
+                create_notification(
+                    db=db,
+                    user_id=hr.id,
+                    title="协作评分已全部完成",
+                    content=f"员工 {emp.name if emp else record.employee_id} 的所有协作评分任务已完成，当前状态：{record.status}。",
+                    type="peer_completed",
+                )
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="peer_review_task_submit",
+        target_type="peer_review_task",
+        target_id=task_id,
+        old_value={"status": "pending"},
+        new_value={"status": "completed", "ability": body.ability, "comment": body.comment},
+    )
+
+    return {
+        "task_id": task_id,
+        "ability": body.ability,
+        "comment": body.comment,
+        "status": "completed",
+    }
+
+
+@router.post("/cycles/{cycle_id}/confirm-distribution")
+def confirm_distribution(
+    cycle_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr")),
+):
+    """确认强制分布调整，将考核记录从 pending_distribution_review 推进到 pending_approval"""
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
+
+    records = (
+        db.query(AssessmentRecord)
+        .filter(AssessmentRecord.cycle_id == cycle_id)
+        .filter(AssessmentRecord.status == "pending_distribution_review")
+        .all()
+    )
+
+    updated = 0
+    skipped = []
+    for r in records:
+        if r.grade is None:
+            skipped.append({"record_id": r.id, "reason": "grade is None"})
+            continue
+        r.original_grade = r.grade
+        new_state = WorkflowStateMachine.transition(
+            current_state="pending_distribution_review",
+            action="confirm_distribution",
+            db=db,
+            user_id=user.id,
+            target_id=r.id,
+            target_type="assessment_record",
+        )
+        r.status = new_state
+        updated += 1
+
+    db.commit()
+
+    if updated > 0:
+        log_operation(
+            db=db,
+            user_id=user.id,
+            action="confirm_distribution",
+            target_type="assessment_cycle",
+            target_id=cycle_id,
+            old_value={"status": "pending_distribution_review"},
+            new_value={"status": "pending_approval"},
+        )
+
+    return {
+        "updated": updated,
+        "cycle_id": cycle_id,
+        "status": "pending_approval",
+        "skipped": skipped,
     }

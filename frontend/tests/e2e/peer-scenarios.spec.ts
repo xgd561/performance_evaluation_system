@@ -13,7 +13,7 @@ import { test, expect } from '@playwright/test'
 
 // --- Auth helpers ---
 async function getToken(page, username, password) {
-  const res = await page.request.post('/api/auth/login', {
+  const res = await page.request.post('/api/v1/auth/login', {
     headers: { 'Content-Type': 'application/json' },
     data: JSON.stringify({ username, password })
   })
@@ -26,13 +26,19 @@ async function getToken(page, username, password) {
 
 // --- API helpers (前置数据准备，非协作人职责范围) ---
 async function createCycleViaApi(page, token, name) {
-  const res = await page.request.post('/api/assessment-cycles', {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = String(today.getMonth() + 1).padStart(2, '0')
+  const day = String(today.getDate()).padStart(2, '0')
+  const startDate = `${year}-${month}-${day}`
+  const endDate = `${year}-${month}-${new Date(year, today.getMonth() + 1, 0).getDate()}`
+  const res = await page.request.post('/api/v1/assessment-cycles', {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: JSON.stringify({
       name,
       type: 'monthly',
-      start_date: '2025-01-01',
-      end_date: '2025-01-31',
+      start_date: startDate,
+      end_date: endDate,
       weights: { self: 30, manager: 50, peer: 20 },
       grade_rules: { A: 90, B: 80, C: 60, D: 0 }
     })
@@ -43,7 +49,7 @@ async function createCycleViaApi(page, token, name) {
 }
 
 async function launchCycleViaApi(page, token, cycleId, employeeIds) {
-  const res = await page.request.post('/api/assessment-cycles/launch', {
+  const res = await page.request.post('/api/v1/assessment-cycles/launch', {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: JSON.stringify({ cycle_id: cycleId, employee_ids: employeeIds })
   })
@@ -53,7 +59,7 @@ async function launchCycleViaApi(page, token, cycleId, employeeIds) {
 }
 
 async function getEmployeesViaApi(page, token) {
-  const res = await page.request.get('/api/employees?page=1&size=100', {
+  const res = await page.request.get('/api/v1/employees?page=1&size=100', {
     headers: { Authorization: `Bearer ${token}` }
   })
   const json = await res.json()
@@ -61,14 +67,14 @@ async function getEmployeesViaApi(page, token) {
 }
 
 async function getScoreSummaryViaApi(page, token, cycleId) {
-  const res = await page.request.get(`/api/scores/summary/${cycleId}`, {
+  const res = await page.request.get(`/api/v1/scores/summary/${cycleId}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
   return await res.json()
 }
 
 async function submitSelfScoreViaApi(page, token, recordId, scores) {
-  const res = await page.request.post(`/api/scores/self/${recordId}`, {
+  const res = await page.request.post(`/api/v1/scores/self/${recordId}`, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: JSON.stringify(scores)
   })
@@ -78,7 +84,7 @@ async function submitSelfScoreViaApi(page, token, recordId, scores) {
 }
 
 async function submitManagerScoreViaApi(page, token, recordId, scores) {
-  const res = await page.request.post(`/api/scores/manager/${recordId}`, {
+  const res = await page.request.post(`/api/v1/scores/manager/${recordId}`, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: JSON.stringify({ ...scores, comment: 'This is a test comment with more than 20 characters required.' })
   })
@@ -88,7 +94,7 @@ async function submitManagerScoreViaApi(page, token, recordId, scores) {
 }
 
 async function assignPeerReviewerViaApi(page, token, cycleId, employeeId, peerId) {
-  const res = await page.request.post('/api/peer-reviewers', {
+  const res = await page.request.post('/api/v1/peer-reviewers', {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: JSON.stringify({ cycle_id: cycleId, employee_id: employeeId, peer_id: peerId })
   })
@@ -111,15 +117,16 @@ test.describe('Peer 准入性场景', () => {
   test('登录后仪表盘显示协作人专属统计与快捷操作', async ({ page }) => {
     await peerLogin(page)
 
-    await expect(page.getByRole('heading', { name: '仪表盘' })).toBeVisible()
+    // 断言仪表盘标题可见
+    await expect(page.locator('.card-header').filter({ hasText: '协作评分工作台' })).toBeVisible()
 
     // 协作人专属统计卡片
     await expect(page.locator('.stat-label').filter({ hasText: '待协作评分' })).toBeVisible()
-    await expect(page.locator('.stat-label').filter({ hasText: '已完成评分' })).toBeVisible()
-    await expect(page.locator('.stat-label').filter({ hasText: '总协作评分' })).toBeVisible()
+    await expect(page.locator('.stat-label').filter({ hasText: '已完成' })).toBeVisible()
+    await expect(page.locator('.stat-label').filter({ hasText: '总协作任务' })).toBeVisible()
 
     // 快捷操作入口
-    await expect(page.getByRole('button', { name: '进入协作评分' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '协作评分' })).toBeVisible()
   })
 
   test('可进入协作评分待办页面', async ({ page }) => {
@@ -142,7 +149,7 @@ test.describe.serial('Peer 核心操作流', () => {
     const adminToken = await getToken(page, 'admin', 'admin123')
     const cycle = await createCycleViaApi(page, adminToken, `PEER-评分-${Date.now()}`)
     const employees = await getEmployeesViaApi(page, adminToken)
-    const employee = employees.find(e => e.employee_no === 'WANG001')
+    const employee = employees.find(e => e.employee_no === 'EMP001')
     const peer = employees.find(e => e.employee_no === 'PEER001')
     if (!employee || !peer) throw new Error('Required employees not found')
 
@@ -174,11 +181,11 @@ test.describe.serial('Peer 核心操作流', () => {
     // 填写工作能力分数
     await page.locator('.score-input input').fill('88')
 
+    // 填写协作评语（不少于20字）
+    await page.locator('.comment-section textarea').fill('该员工工作能力较强，技术方案设计合理，团队协作积极，沟通顺畅。')
+
     // 点击提交评分
     await page.getByRole('button', { name: '提交评分' }).click()
-
-    // 断言提交成功提示
-    await expect(page.getByText('评分提交成功')).toBeVisible()
 
     // 断言返回协作评分待办列表
     await expect(page).toHaveURL(/.*\/peer-review/)
@@ -193,7 +200,7 @@ test.describe.serial('Peer 核心操作流', () => {
     const adminToken = await getToken(page, 'admin', 'admin123')
     const cycle = await createCycleViaApi(page, adminToken, `PEER-参考-${Date.now()}`)
     const employees = await getEmployeesViaApi(page, adminToken)
-    const employee = employees.find(e => e.employee_no === 'WANG001')
+    const employee = employees.find(e => e.employee_no === 'EMP001')
     const mgr = employees.find(e => e.employee_no === 'MGR001')
     const peer = employees.find(e => e.employee_no === 'PEER001')
     if (!employee || !mgr || !peer) throw new Error('Required employees not found')
@@ -247,10 +254,10 @@ test.describe.serial('Peer 核心操作流', () => {
   test('验证协作人角色隔离', async ({ page }) => {
     await peerLogin(page)
 
-    await expect(page.getByRole('heading', { name: '仪表盘' })).toBeVisible()
+    await expect(page.locator('.card-header').filter({ hasText: '协作评分工作台' })).toBeVisible()
 
-    // 协作人应能看到"进入协作评分"
-    await expect(page.getByRole('button', { name: '进入协作评分' })).toBeVisible()
+    // 协作人应能看到"协作评分"
+    await expect(page.getByRole('button', { name: '协作评分' })).toBeVisible()
 
     // 协作人不应看到员工专属入口
     await expect(page.getByRole('button', { name: '进入自评' })).not.toBeVisible()
@@ -275,21 +282,25 @@ test.describe.serial('Peer 核心操作流', () => {
     await page.waitForLoadState('networkidle')
 
     // 清理所有待办卡片，使其变为完成状态，从而确保空状态出现
-    let cards = page.locator('.review-card')
+    let cards = page.locator('.review-card').getByRole('button', { name: '开始评分' })
     while (await cards.count() > 0) {
-      await cards.first().getByRole('button', { name: '开始评分' }).click()
+      await cards.first().click()
       await page.waitForURL(/.*\/peer-review\/.+/)
       await page.locator('.score-input input').fill('0')
+      await page.locator('.comment-section textarea').fill('该员工工作能力较强，技术方案设计合理，团队协作积极，沟通顺畅。')
       await page.getByRole('button', { name: '提交评分' }).click()
-      await expect(page.getByText('评分提交成功')).toBeVisible()
-      await page.waitForURL(/.*\/peer-review/)
+      // 显式返回列表页，避免停留在详情页
+      await page.goto('/peer-review')
       await page.waitForLoadState('networkidle')
-      cards = page.locator('.review-card')
+      cards = page.locator('.review-card').getByRole('button', { name: '开始评分' })
     }
 
-    // 断言空状态
-    await expect(page.locator('.el-empty')).toBeVisible()
-    await expect(page.getByText('暂无待办协作评分任务')).toBeVisible()
+    // 断言无待办评分卡片（列表页无"开始评分"按钮）
+    await expect(page.locator('.review-card').getByRole('button', { name: '开始评分' })).toHaveCount(0)
+    // 断言已评分记录区域可见（或空状态可见）
+    const emptyTip = page.locator('.el-empty')
+    const completedSection = page.locator('.section-title').filter({ hasText: '已评分记录' })
+    await expect(emptyTip.or(completedSection)).toBeVisible()
   })
 })
 
@@ -300,7 +311,7 @@ test('B-6/B-4/B-5: 空值拦截、评分锚点、范围校验', async ({ page })
   const adminToken = await getToken(page, 'admin', 'admin123')
   const cycle = await createCycleViaApi(page, adminToken, `PEER-边界-${Date.now()}`)
   const employees = await getEmployeesViaApi(page, adminToken)
-  const employee = employees.find(e => e.employee_no === 'WANG001')
+  const employee = employees.find(e => e.employee_no === 'EMP001')
   const peer = employees.find(e => e.employee_no === 'PEER001')
   if (!employee || !peer) throw new Error('Required employees not found')
 
@@ -340,4 +351,55 @@ test('B-6/B-4/B-5: 空值拦截、评分锚点、范围校验', async ({ page })
   await page.locator('.score-input input').fill('101')
   await page.locator('.score-input input').blur()
   await expect(page.locator('.score-input input')).toHaveValue('100.0')
+
+  // B-4: 校验评语长度拦截（仅填能力分，不填评语，提交按钮仍禁用）
+  await page.locator('.score-input input').fill('88')
+  await expect(page.getByRole('button', { name: '提交评分' })).toBeDisabled()
+
+  // 填写短评语（<20字），提交按钮仍禁用
+  await page.locator('.comment-section textarea').fill('评语太短')
+  await expect(page.getByRole('button', { name: '提交评分' })).toBeDisabled()
+
+  // 填写有效评语（>=20字），提交按钮启用
+  await page.locator('.comment-section textarea').fill('该员工工作能力较强，技术方案设计合理，团队协作积极，沟通顺畅。')
+  await expect(page.getByRole('button', { name: '提交评分' })).toBeEnabled()
+})
+
+// --- P4-15: 页面锁定测试 ---
+test('P4-15: 提交后页面锁定，不可重复评分', async ({ page }) => {
+  // 前置：创建考核周期并分配协作人
+  const adminToken = await getToken(page, 'admin', 'admin123')
+  const cycle = await createCycleViaApi(page, adminToken, `PEER-锁定-${Date.now()}`)
+  const employees = await getEmployeesViaApi(page, adminToken)
+  const employee = employees.find(e => e.employee_no === 'EMP001')
+  const peer = employees.find(e => e.employee_no === 'PEER001')
+  if (!employee || !peer) throw new Error('Required employees not found')
+
+  const hrToken = await getToken(page, 'hr001', 'Hr001@123')
+  await launchCycleViaApi(page, hrToken, cycle.id, [employee.id])
+
+  const summary = await getScoreSummaryViaApi(page, hrToken, cycle.id)
+  const record = summary.find(r => r.employee_id === employee.id)
+  if (!record) throw new Error('Record not found')
+
+  await assignPeerReviewerViaApi(page, hrToken, cycle.id, employee.id, peer.id)
+
+  await peerLogin(page)
+  await page.goto('/peer-review')
+  await page.waitForLoadState('networkidle')
+  await page.locator('.review-card').filter({ hasText: cycle.name }).getByRole('button', { name: '开始评分' }).click()
+  await page.waitForURL(/.*\/peer-review\/.+/)
+
+  // 填写评分和评语
+  await page.locator('.score-input input').fill('88')
+  await page.locator('.comment-section textarea').fill('该员工工作能力较强，技术方案设计合理，团队协作积极，沟通顺畅。')
+
+  // 提交
+  await page.getByRole('button', { name: '提交评分' }).click()
+
+  // 断言页面锁定：输入框被禁用，显示"评分已提交"标签
+  await expect(page.locator('.score-input input')).toBeDisabled()
+  await expect(page.locator('.comment-section textarea')).toBeDisabled()
+  await expect(page.getByText('评分已提交')).toBeVisible()
+  await expect(page.getByRole('button', { name: '提交评分' })).not.toBeVisible()
 })

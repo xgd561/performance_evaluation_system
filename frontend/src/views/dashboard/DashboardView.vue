@@ -149,6 +149,18 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="进度" width="180">
+          <template #default="{ row }">
+            <el-progress
+              v-if="row.status !== 'not_started' && row.status !== 'archived'"
+              :percentage="Math.round(cycleProgress[row.id]?.self_completion_rate || 0)"
+              :status="cycleProgress[row.id]?.self_completion_rate === 100 ? 'success' : ''"
+              :stroke-width="10"
+              :text-inside="true"
+            />
+            <span v-else class="progress-placeholder">—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="start_date" label="开始日期" width="120" />
         <el-table-column prop="end_date" label="结束日期" width="120" />
         <el-table-column label="操作" width="120" align="center">
@@ -176,9 +188,9 @@ import { ElMessage } from 'element-plus'
 import {
   Check, Setting, User, OfficeBuilding, Calendar, Star,
   Edit, DocumentChecked, ChatDotRound, Download, Warning,
-  TrendCharts, View, List, ArrowRight
+  TrendCharts, View, List, ArrowRight, Flag
 } from '@element-plus/icons-vue'
-import { listCycles } from '@/api/cycles'
+import { listCycles, getCycleProgress } from '@/api/cycles'
 import request from '@/api/request'
 
 const router = useRouter()
@@ -286,6 +298,7 @@ const activeCycle = ref(null)
 const recentCycles = ref([])
 const badgeCounts = ref({})
 const dashboardData = ref({})
+const cycleProgress = ref({})
 
 // 统计卡片数据
 const statCards = computed(() => {
@@ -303,10 +316,11 @@ const statCards = computed(() => {
 
   if (role === 'hr') {
     return [
-      { label: '待汇总', value: data.to_summary || 0, icon: 'TrendCharts', color: '#f56c6c', badge: data.to_summary > 0 ? ' urgent' : '', link: '/summary', highlight: true },
-      { label: '待审批', value: data.to_approve || 0, icon: 'DocumentChecked', color: '#e6a23c', badge: data.to_approve > 0 ? ' pending' : '', link: '/approval-workbench' },
-      { label: '待归档', value: data.to_archive || 0, icon: 'Download', color: '#67c23a', link: '/reports' },
-      { label: '待处理申诉', value: data.pending_appeals || 0, icon: 'Warning', color: '#409eff', link: '/appeals' },
+      { label: '当前周期', value: data.cycle_count || 0, icon: 'Calendar', color: '#409eff', link: '/cycles' },
+      { label: '待汇总', value: data.to_summary || 0, icon: 'TrendCharts', color: '#f56c6c', badge: data.to_summary > 0 ? 'urgent' : '', link: '/summary', highlight: true },
+      { label: '待审批', value: data.to_approve || 0, icon: 'DocumentChecked', color: '#e6a23c', badge: data.to_approve > 0 ? 'pending' : '', link: '/approval-workbench' },
+      { label: '待处理申诉', value: data.pending_appeals || 0, icon: 'Warning', color: '#67c23a', link: '/appeals' },
+      { label: '强制分布超标', value: data.force_distribution_exceeded || 0, icon: 'Flag', color: '#909399', link: '/distribution-review' },
     ]
   }
 
@@ -459,11 +473,23 @@ onMounted(async () => {
       try {
         const res = await request.get(`/dashboard${role === 'admin' || role === 'hr' ? '' : '/' + role}`)
         if (res) {
-          dashboardData.value = res
-          badgeCounts.value = res
+          dashboardData.value = res.stats || res
+          badgeCounts.value = res.stats || res
         }
       } catch (e) {
         console.warn('Dashboard API error:', e)
+      }
+    }
+
+    // 加载各周期进度
+    for (const cycle of recentCycles.value) {
+      if (cycle.status !== 'not_started' && cycle.status !== 'archived') {
+        try {
+          const progress = await getCycleProgress(cycle.id)
+          cycleProgress.value[cycle.id] = progress
+        } catch (e) {
+          console.warn('Progress fetch error:', e)
+        }
       }
     }
   } catch (e) {
@@ -700,6 +726,16 @@ onMounted(async () => {
 .card-title {
   font-weight: bold;
   font-size: 16px;
+}
+
+.progress-placeholder {
+  color: #c0c4cc;
+  font-size: 12px;
+}
+
+.progress-placeholder {
+  color: #c0c4cc;
+  font-size: 12px;
 }
 
 @media (max-width: 768px) {

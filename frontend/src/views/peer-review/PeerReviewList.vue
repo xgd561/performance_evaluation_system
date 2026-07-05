@@ -14,7 +14,7 @@
         <h3 class="section-title">待办评分</h3>
         <el-card
           v-for="item in pendingReviews"
-          :key="item.id"
+          :key="item.task_id"
           class="review-card"
           shadow="hover"
         >
@@ -60,7 +60,7 @@
         <h3 class="section-title">已评分记录</h3>
         <el-card
           v-for="item in completedReviews"
-          :key="item.id"
+          :key="item.task_id"
           class="review-card completed"
           shadow="hover"
         >
@@ -117,7 +117,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getMyPeerReviews } from '@/api/scores'
+import { getPeerReviewList } from '@/api/scores'
 
 const router = useRouter()
 const loading = ref(false)
@@ -133,16 +133,16 @@ function sortByDueDate(list) {
 }
 
 const pendingReviews = computed(() =>
-  sortByDueDate(reviews.value.filter(r => r.peer_relation_status !== 'completed'))
+  sortByDueDate(reviews.value.filter(r => r.status !== 'completed'))
 )
 const completedReviews = computed(() =>
-  sortByDueDate(reviews.value.filter(r => r.peer_relation_status === 'completed'))
+  sortByDueDate(reviews.value.filter(r => r.status === 'completed'))
 )
 
 onMounted(async () => {
   loading.value = true
   try {
-    const res = await getMyPeerReviews()
+    const res = await getPeerReviewList()
     reviews.value = res?.items || []
   } catch (e) {
     console.error(e)
@@ -177,7 +177,7 @@ function statusText(status) {
 }
 
 function goScore(item) {
-  router.push(`/peer-review/${item.record_id}`)
+  router.push(`/peer-review/${item.task_id}`)
 }
 </script>
 

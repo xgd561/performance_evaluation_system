@@ -79,8 +79,8 @@ class TestPublicationVisibility:
         item = data["items"][0]
         assert item["record_id"] == record.id
         assert item["status"] == "pending_approval"
-        # Scores should be masked
-        assert item["self_scores"] == {}
+        # self_scores is visible to employee even for unpublished records; other scores are masked
+        assert item["self_scores"] == {"performance": 80, "ability": 70, "attitude": 90}
         assert item["manager_scores"] == {}
         assert item["peer_scores"] == {}
         assert item["weighted_performance"] is None
