@@ -30,7 +30,7 @@ test.describe('HR 仪表盘', () => {
   test('应显示最近考核周期表格', async ({ page }) => {
     await hrLogin(page)
     await expect(page.getByText('最近考核周期')).toBeVisible()
-    await expect(page.locator('table')).toBeVisible()
+    await expect(page.locator('.custom-table')).toBeVisible()
   })
 
   test('统计卡片应可点击导航', async ({ page }) => {

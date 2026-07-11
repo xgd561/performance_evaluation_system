@@ -15,7 +15,7 @@ export default defineConfig({
   timeout: 60 * 1000,
 
   /* 并行运行测试文件 */
-  fullyParallel: true,
+  fullyParallel: false,
 
   /* CI 中禁止 test.only */
   forbidOnly: !!process.env.CI,
@@ -31,7 +31,7 @@ export default defineConfig({
 
   use: {
     /* 基础 URL，所有 page.goto('/xxx') 会基于此 */
-    baseURL: 'http://localhost:3000',
+    baseURL: 'http://127.0.0.1:3000',
 
     /* 收集追踪信息（首次失败时） */
     trace: 'on-first-retry',
@@ -59,7 +59,7 @@ export default defineConfig({
   /* 自动启动前端开发服务器 */
   webServer: {
     command: 'npm run dev',
-    url: 'http://localhost:3000',
+    url: 'http://127.0.0.1:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
   },

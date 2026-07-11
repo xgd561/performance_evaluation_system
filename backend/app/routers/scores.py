@@ -16,6 +16,7 @@ from app.services.score_calculator import calculate_weighted_score, calculate_kp
 from app.services.notification_service import create_notification
 from app.utils.workflow_state_machine import WorkflowStateMachine
 from app.routers.employees import _is_in_subordinate_chain, get_all_dept_ids
+from app.routers.archive_guard import check_record_not_archived, check_cycle_not_archived
 
 router = APIRouter()
 
@@ -170,6 +171,8 @@ def calculate_scores(
     cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
     if not cycle:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
+
+    check_cycle_not_archived(cycle_id, db)
 
     dim_weights = json.loads(cycle.dimension_weights)
     reviewer_weights = json.loads(cycle.reviewer_weights)
@@ -440,6 +443,8 @@ def submit_manager_score(
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
 
+    check_record_not_archived(record_id, db)
+
     current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
     if not current_employee:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工信息不存在")
@@ -565,6 +570,8 @@ def submit_peer_score(
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
 
+    check_record_not_archived(record_id, db)
+
     current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
     if not current_employee:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工信息不存在")
@@ -588,6 +595,16 @@ def submit_peer_score(
 
     record.peer_scores = json.dumps(peer_scores)
     peer_relation.status = "completed"
+
+    # 同时更新 PeerReviewTask（如有），保证 calculate_scores 能检测到已完成
+    peer_task = db.query(PeerReviewTask).filter(
+        PeerReviewTask.record_id == record_id,
+        PeerReviewTask.reviewer_id == current_employee.id,
+    ).first()
+    if peer_task:
+        peer_task.ability_score = body.ability
+        peer_task.status = "completed"
+        peer_task.submitted_at = datetime.utcnow()
 
     db.commit()
     db.refresh(record)
@@ -732,6 +749,8 @@ def submit_self_score(
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
 
+    check_record_not_archived(record_id, db)
+
     # 权限校验：只能评自己的
     if record.employee_id != user.employee_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作此考核记录")
@@ -823,6 +842,8 @@ def save_manager_draft(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    check_record_not_archived(record_id, db)
 
     current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
     if not current_employee:
@@ -929,6 +950,8 @@ def save_score_draft(
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
 
+    check_record_not_archived(record_id, db)
+
     draft_type = _check_draft_permission(record, user, db)
     column_name = _get_draft_column(draft_type)
 
@@ -964,6 +987,8 @@ def delete_score_draft(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    check_record_not_archived(record_id, db)
 
     draft_type = _check_draft_permission(record, user, db)
     column_name = _get_draft_column(draft_type)
@@ -1340,6 +1365,8 @@ def confirm_distribution(
     cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
     if not cycle:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
+
+    check_cycle_not_archived(cycle_id, db)
 
     records = (
         db.query(AssessmentRecord)

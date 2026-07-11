@@ -63,3 +63,10 @@ frontend/playwright-report/
 backend/_fix_main.py
 backend/test_export.xlsx
 
+# Uploads & generated files
+backend/uploads/
+backend/test_uploads/
+frontend/appeal-page.html
+frontend/debug-appeal.cjs
+frontend/vite.config.js.timestamp-*
+

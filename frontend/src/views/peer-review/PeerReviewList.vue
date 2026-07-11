@@ -117,6 +117,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import PageContainer from '@/components/PageContainer.vue'
 import { getPeerReviewList } from '@/api/scores'
 
 const router = useRouter()

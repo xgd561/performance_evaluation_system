@@ -141,6 +141,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import PageContainer from '@/components/PageContainer.vue'
 import { getPeerReviewList, submitPeerReviewTask } from '@/api/scores'
 import { SCORE_ANCHORS } from '@/utils/constants'
 

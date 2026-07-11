@@ -118,7 +118,7 @@ test.describe('Peer 准入性场景', () => {
     await peerLogin(page)
 
     // 断言仪表盘标题可见
-    await expect(page.locator('.card-header').filter({ hasText: '协作评分工作台' })).toBeVisible()
+    await expect(page.getByText('协作评分工作台')).toBeVisible()
 
     // 协作人专属统计卡片
     await expect(page.locator('.stat-label').filter({ hasText: '待协作评分' })).toBeVisible()
@@ -254,7 +254,7 @@ test.describe.serial('Peer 核心操作流', () => {
   test('验证协作人角色隔离', async ({ page }) => {
     await peerLogin(page)
 
-    await expect(page.locator('.card-header').filter({ hasText: '协作评分工作台' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '协作评分工作台' })).toBeVisible()
 
     // 协作人应能看到"协作评分"
     await expect(page.getByRole('button', { name: '协作评分' })).toBeVisible()

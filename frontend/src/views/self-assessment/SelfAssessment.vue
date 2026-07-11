@@ -149,6 +149,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import PageContainer from '@/components/PageContainer.vue'
 import { getMyAssessment, getSelfAssessmentData, submitSelfScore, createScoreDraft } from '@/api/scores'
 import { SCORE_ANCHORS, DIMENSION_TEXT } from '@/utils/constants'
 

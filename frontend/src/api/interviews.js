@@ -5,7 +5,7 @@ export function getPendingInterviews() {
 }
 
 export function getManagerInterviewList(keyword = '') {
-  return request.get('/manager/interview-list', { params: { keyword } })
+  return request.get('/interviews/manager/interview-list', { params: { keyword } })
 }
 
 export function submitInterview(recordId, data) {

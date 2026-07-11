@@ -55,6 +55,7 @@ api_v1.include_router(departments.router_positions, prefix="/positions", tags=["
 api_v1.include_router(cycles.router, prefix="/assessment-cycles", tags=["考核周期"])
 api_v1.include_router(kpi_templates.router, prefix="/kpi-templates", tags=["KPI模板"])
 api_v1.include_router(config.router, prefix="/config", tags=["系统配置"])
+api_v1.include_router(dashboard.router, prefix="/dashboard", tags=["仪表盘"])
 api_v1.include_router(appeals.router, prefix="/appeals", tags=["申诉管理"])
 api_v1.include_router(scores.router, prefix="/scores", tags=["评分管理"])
 api_v1.include_router(score_drafts.score_drafts_router, prefix="/score-drafts", tags=["评分草稿"])
@@ -181,7 +182,7 @@ async def startup_event():
             db.flush()
             hr = User(
                 username="hr001",
-                password_hash=get_password_hash("Hr001@123"),
+                password_hash=get_password_hash("admin123"),
                 role="hr",
                 employee_id=hr_emp.id,
                 is_first_login=False,
@@ -202,7 +203,7 @@ async def startup_event():
             db.flush()
             mgr = User(
                 username="mgr001",
-                password_hash=get_password_hash("Mgr001@123"),
+                password_hash=get_password_hash("admin123"),
                 role="manager",
                 employee_id=mgr_emp.id,
                 is_first_login=False,
@@ -223,7 +224,7 @@ async def startup_event():
             db.flush()
             emp_user = User(
                 username="emp001",
-                password_hash=get_password_hash("Emp001@123"),
+                password_hash=get_password_hash("admin123"),
                 role="employee",
                 employee_id=emp_emp.id,
                 is_first_login=True,
@@ -244,7 +245,7 @@ async def startup_event():
             db.flush()
             peer = User(
                 username="peer001",
-                password_hash=get_password_hash("Peer001@123"),
+                password_hash=get_password_hash("admin123"),
                 role="peer",
                 employee_id=peer_emp.id,
                 is_first_login=False,

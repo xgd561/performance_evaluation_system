@@ -153,10 +153,12 @@ async function loadOverrides() {
   if (!queryForm.cycle_id) return
   overrideLoading.value = true
   try {
+    console.log('[DistributionReview] loadOverrides cycle_id:', queryForm.cycle_id)
     const res = await getDistributionOverrides(queryForm.cycle_id)
+    console.log('[DistributionReview] overrides response:', res)
     overrides.value = res || []
   } catch (e) {
-    console.error(e)
+    console.error('[DistributionReview] overrides error:', e)
     ElMessage.error('获取特批申请失败')
   } finally {
     overrideLoading.value = false

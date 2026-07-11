@@ -14,6 +14,7 @@ from app.models import (
 from app.services.operation_logger import log_operation
 from app.routers.employees import _is_in_subordinate_chain, get_all_dept_ids
 from app.utils.workflow_state_machine import WorkflowStateMachine
+from app.routers.archive_guard import check_record_not_archived
 
 DEFAULT_APPROVAL_CHAIN = ["direct_manager", "dept_head", "hr_head"]
 
@@ -310,7 +311,39 @@ def get_pending_approvals(
     return result
 
 
-@router.get("/{record_id}")
+@router.get("/distribution-overrides")
+def get_distribution_overrides(
+    cycle_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("admin", "hr", "executive")),
+):
+    """获取强制分布特批申请列表"""
+    query = db.query(AssessmentRecord).filter(
+        AssessmentRecord.override_reason != None,
+        AssessmentRecord.is_distribution_override == False,
+    )
+    if cycle_id:
+        query = query.filter(AssessmentRecord.cycle_id == cycle_id)
+    records = query.all()
+
+    result = []
+    for r in records:
+        emp = db.query(Employee).filter(Employee.id == r.employee_id).first()
+        result.append({
+            "record_id": r.id,
+            "employee_id": r.employee_id,
+            "employee_name": emp.name if emp else None,
+            "employee_no": emp.employee_no if emp else None,
+            "total_score": str(r.total_score) if r.total_score else None,
+            "original_grade": r.original_grade,
+            "adjusted_grade": r.grade,
+            "override_reason": r.override_reason,
+        })
+
+    return result
+
+
+@router.get("/{record_id:int}")
 def get_approval_detail(
     record_id: int,
     db: Session = Depends(get_db),
@@ -415,7 +448,7 @@ def get_approval_detail(
     }
 
 
-@router.post("/{record_id}/approve")
+@router.post("/{record_id:int}/approve")
 def approve_record(
     record_id: int,
     comment: Optional[str] = Body(None, embed=True),
@@ -426,6 +459,8 @@ def approve_record(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    check_record_not_archived(record_id, db)
 
     if record.status != "pending_approval":
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="当前状态不允许审批")
@@ -499,7 +534,7 @@ def approve_record(
     return {"message": "审批通过", "record_id": record_id, "status": record.status}
 
 
-@router.post("/{record_id}/reject")
+@router.post("/{record_id:int}/reject")
 def reject_record(
     record_id: int,
     reason: str = Body(..., embed=True),
@@ -510,6 +545,8 @@ def reject_record(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    check_record_not_archived(record_id, db)
 
     if record.status != "pending_approval":
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="当前状态不允许审批")
@@ -579,7 +616,7 @@ def reject_record(
     return {"message": "已驳回，返回上级修改", "record_id": record_id}
 
 
-@router.post("/{record_id}/rollback")
+@router.post("/{record_id:int}/rollback")
 def rollback_record(
     record_id: int,
     reason: str = Body(..., embed=True),
@@ -590,6 +627,8 @@ def rollback_record(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    check_record_not_archived(record_id, db)
 
     if record.status != "pending_approval":
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="当前状态不允许打回")
@@ -706,7 +745,7 @@ def get_approval_history(
     return result
 
 
-@router.post("/{record_id}/distribution-override")
+@router.post("/{record_id:int}/distribution-override")
 def request_distribution_override(
     record_id: int,
     reason: str,
@@ -717,6 +756,8 @@ def request_distribution_override(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    check_record_not_archived(record_id, db)
 
     current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
     if not current_employee:
@@ -743,39 +784,7 @@ def request_distribution_override(
     return {"message": "特批申请已提交", "record_id": record_id}
 
 
-@router.get("/distribution-overrides")
-def get_distribution_overrides(
-    cycle_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_role("admin", "hr", "executive")),
-):
-    """获取强制分布特批申请列表"""
-    query = db.query(AssessmentRecord).filter(
-        AssessmentRecord.override_reason != None,
-        AssessmentRecord.is_distribution_override == False,
-    )
-    if cycle_id:
-        query = query.filter(AssessmentRecord.cycle_id == cycle_id)
-    records = query.all()
-
-    result = []
-    for r in records:
-        emp = db.query(Employee).filter(Employee.id == r.employee_id).first()
-        result.append({
-            "record_id": r.id,
-            "employee_id": r.employee_id,
-            "employee_name": emp.name if emp else None,
-            "employee_no": emp.employee_no if emp else None,
-            "total_score": str(r.total_score) if r.total_score else None,
-            "original_grade": r.original_grade,
-            "adjusted_grade": r.grade,
-            "override_reason": r.override_reason,
-        })
-
-    return result
-
-
-@router.post("/distribution-overrides/{record_id}/approve")
+@router.post("/distribution-overrides/{record_id:int}/approve")
 def approve_distribution_override(
     record_id: int,
     db: Session = Depends(get_db),
@@ -785,6 +794,8 @@ def approve_distribution_override(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    check_record_not_archived(record_id, db)
 
     if not record.override_reason:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="该记录未提交特批申请")
@@ -807,7 +818,7 @@ def approve_distribution_override(
     return {"message": "特批已通过，等级恢复为原始等级", "record_id": record_id, "grade": record.grade}
 
 
-@router.post("/distribution-overrides/{record_id}/reject")
+@router.post("/distribution-overrides/{record_id:int}/reject")
 def reject_distribution_override(
     record_id: int,
     db: Session = Depends(get_db),
@@ -817,6 +828,8 @@ def reject_distribution_override(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    check_record_not_archived(record_id, db)
 
     if not record.override_reason:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="该记录未提交特批申请")

@@ -113,7 +113,7 @@ export default {
       record: null,
       existingInterview: null,
       form: {
-        interview_time: '',
+        interview_time: new Date().toISOString().slice(0, 19),
         location: '',
         content: '',
         improvement_plan: '',

@@ -5,13 +5,19 @@
 
     <template v-else>
     <!-- 顶部：6阶段全流程图 -->
-    <el-card class="flow-card" shadow="hover">
-      <template #header>
-        <div class="card-header">
-          <span>{{ pageTitle }}</span>
-          <el-tag v-if="activeCycle" type="primary" size="small">{{ activeCycle.name }}</el-tag>
+    <div class="dashboard-hero-card">
+      <div class="hero-header">
+        <div class="hero-title">
+          <span class="hero-title-text" role="heading" aria-level="1">{{ pageTitle }}</span>
+          <span v-if="activeCycle" class="hero-cycle-tag">{{ activeCycle.name }}</span>
         </div>
-      </template>
+        <div class="hero-meta">
+          <span class="meta-item">
+            <el-icon><Calendar /></el-icon>
+            {{ new Date().toLocaleDateString('zh-CN') }}
+          </span>
+        </div>
+      </div>
 
       <div class="process-flow-wrapper">
         <div class="process-flow">
@@ -37,7 +43,7 @@
             <div class="stage-title">{{ stage.title }}</div>
             <div class="stage-desc">{{ stage.desc }}</div>
             <div class="stage-status" v-if="isCurrent(stage.key)">
-              <el-tag size="small" type="warning">进行中</el-tag>
+              <span class="status-pill">进行中</span>
             </div>
           </div>
 
@@ -55,14 +61,15 @@
 
       <!-- 当前任务提示卡片 -->
       <div class="current-task-bar" v-if="currentTask">
-        <el-alert
-          :title="currentTask.title"
-          :type="currentTask.type"
-          :description="currentTask.desc"
-          show-icon
-          :closable="false"
-        >
-          <template #default>
+        <div class="task-alert" :class="currentTask.type">
+          <div class="task-alert-icon">
+            <el-icon size="20"><Warning /></el-icon>
+          </div>
+          <div class="task-alert-content">
+            <div class="task-alert-title">{{ currentTask.title }}</div>
+            <div class="task-alert-desc">{{ currentTask.desc }}</div>
+          </div>
+          <div class="task-alert-action">
             <el-button
               v-if="currentTask.link"
               type="primary"
@@ -71,26 +78,23 @@
             >
               {{ currentTask.btnText }}
             </el-button>
-          </template>
-        </el-alert>
+          </div>
+        </div>
       </div>
-    </el-card>
+    </div>
 
     <!-- 统计卡片区 -->
-    <el-row :gutter="20" class="stats-row">
-      <el-col
-        :xs="12" :sm="8" :md="6"
+    <div class="stats-grid">
+      <div
         v-for="card in statCards"
         :key="card.label"
+        class="stat-card"
+        :class="{ 'highlight': card.highlight }"
+        @click="card.link && $router.push(card.link)"
       >
-        <el-card
-          class="stat-card"
-          shadow="hover"
-          :class="{ 'highlight': card.highlight }"
-          @click="card.link && $router.push(card.link)"
-        >
-          <div class="stat-icon" :style="{ color: card.color }">
-            <el-icon size="28"><component :is="card.icon" /></el-icon>
+        <div class="stat-card-inner">
+          <div class="stat-icon-wrapper" :style="{ '--icon-color': card.color }">
+            <el-icon size="24"><component :is="card.icon" /></el-icon>
           </div>
           <div class="stat-info">
             <div class="stat-label">{{ card.label }}</div>
@@ -99,58 +103,64 @@
             </div>
             <div class="stat-sublabel" v-if="card.sublabel">{{ card.sublabel }}</div>
           </div>
-          <el-tag
-            v-if="card.badge"
-            class="stat-badge"
-            type="danger"
-            effect="dark"
-            size="small"
-          >{{ card.badge }}</el-tag>
-        </el-card>
-      </el-col>
-    </el-row>
+          <div v-if="card.badge" class="stat-badge">
+            {{ card.badge }}
+          </div>
+        </div>
+        <div class="stat-card-glow" :style="{ background: card.color }"></div>
+      </div>
+    </div>
 
     <!-- 快捷操作区 -->
-    <el-card class="mt-20" shadow="hover" v-if="quickActions.length > 0">
-      <template #header>
-        <div class="card-title">快捷操作</div>
-      </template>
-      <el-row :gutter="20">
-        <el-col
-          :xs="12" :sm="8" :md="6"
+    <div class="dashboard-card" v-if="quickActions.length > 0">
+      <div class="card-header-custom">
+        <div class="card-header-icon">
+          <el-icon size="18"><Star /></el-icon>
+        </div>
+        <span class="card-header-title">快捷操作</span>
+      </div>
+      <div class="quick-actions-grid">
+        <div
           v-for="action in quickActions"
           :key="action.label"
+          class="action-btn"
+          role="button"
+          tabindex="0"
+          :class="action.type"
+          @click="$router.push(action.link)"
+          @keydown.enter="$router.push(action.link)"
         >
-          <el-button
-            :type="action.type"
-            size="large"
-            style="width: 100%; margin-bottom: 10px;"
-            @click="$router.push(action.link)"
-          >
-            <el-icon v-if="action.icon"><component :is="action.icon" /></el-icon>
-            {{ action.label }}
-          </el-button>
-        </el-col>
-      </el-row>
-    </el-card>
+          <el-icon size="20" v-if="action.icon"><component :is="action.icon" /></el-icon>
+          <span class="action-label">{{ action.label }}</span>
+          <el-icon size="14" class="action-arrow"><ArrowRight /></el-icon>
+        </div>
+      </div>
+    </div>
 
     <!-- 最近考核周期 -->
-    <el-card class="mt-20" shadow="hover">
-      <template #header>
-        <div class="card-title">最近考核周期</div>
-      </template>
-      <el-table :data="recentCycles" style="width: 100%" v-loading="loading">
-        <el-table-column prop="name" label="名称" min-width="180" />
+    <div class="dashboard-card">
+      <div class="card-header-custom">
+        <div class="card-header-icon">
+          <el-icon size="18"><Calendar /></el-icon>
+        </div>
+        <span class="card-header-title">最近考核周期</span>
+      </div>
+      <el-table :data="recentCycles" style="width: 100%" v-loading="loading" class="custom-table">
+        <el-table-column prop="name" label="名称" min-width="180">
+          <template #default="{ row }">
+            <span class="table-name">{{ row.name }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="type" label="类型" width="100">
           <template #default="{ row }">
-            <el-tag size="small">{{ row.type === 'quarterly' ? '季度' : '年度' }}</el-tag>
+            <span class="type-tag" :class="row.type">{{ row.type === 'quarterly' ? '季度' : '年度' }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="120">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" size="small">
+            <span class="status-tag" :class="row.status">
               {{ statusText(row.status) }}
-            </el-tag>
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="进度" width="180">
@@ -159,8 +169,9 @@
               v-if="row.status !== 'not_started' && row.status !== 'archived'"
               :percentage="Math.round(cycleProgress[row.id]?.self_completion_rate || 0)"
               :status="cycleProgress[row.id]?.self_completion_rate === 100 ? 'success' : ''"
-              :stroke-width="10"
+              :stroke-width="8"
               :text-inside="true"
+              class="custom-progress"
             />
             <span v-else class="progress-placeholder">—</span>
           </template>
@@ -169,18 +180,13 @@
         <el-table-column prop="end_date" label="结束日期" width="120" />
         <el-table-column label="操作" width="120" align="center">
           <template #default="{ row }">
-            <el-button
-              link
-              type="primary"
-              size="small"
-              @click="viewCycleDetail(row)"
-            >
+            <button class="table-action-btn" @click="viewCycleDetail(row)">
               查看
-            </el-button>
+            </button>
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </div>
     </template>
   </div>
 </template>
@@ -247,7 +253,7 @@ function isRoleStage(key) {
   return roleStages.value.includes(key)
 }
 
-// 判断某阶段是否已完成（简化逻辑：当前周期状态已越过该阶段）
+// 判断某阶段是否已完成
 function isCompleted(key) {
   if (!activeCycle.value) return false
   const order = ['not_started', 'pending_self', 'pending_manager', 'pending_peer', 'pending_summary', 'pending_distribution_review', 'pending_approval', 'pending_interview', 'published', 'archived']
@@ -306,62 +312,62 @@ const badgeCounts = ref({})
 const dashboardData = ref({})
 const cycleProgress = ref({})
 
-// 统计卡片数据
+// 统计卡片数据（使用新设计系统的颜色）
 const statCards = computed(() => {
   const role = userRole.value
   const data = dashboardData.value
 
   if (role === 'admin') {
     return [
-      { label: '员工总数', value: data.employee_count || 0, icon: 'User', color: '#409eff', link: '/employees' },
-      { label: '部门数量', value: data.department_count || 0, icon: 'OfficeBuilding', color: '#67c23a', link: '/departments' },
-      { label: '考核周期', value: data.cycle_count || 0, icon: 'Calendar', color: '#e6a23c', link: '/cycles' },
-      { label: '进行中', value: data.active_cycle_count || 0, icon: 'Star', color: '#f56c6c', link: '/cycles', highlight: true },
+      { label: '员工总数', value: data.employee_count || 0, icon: 'User', color: '#6366f1', link: '/employees' },
+      { label: '部门数量', value: data.department_count || 0, icon: 'OfficeBuilding', color: '#10b981', link: '/departments' },
+      { label: '考核周期', value: data.cycle_count || 0, icon: 'Calendar', color: '#f59e0b', link: '/cycles' },
+      { label: '进行中', value: data.active_cycle_count || 0, icon: 'Star', color: '#ef4444', link: '/cycles', highlight: true },
     ]
   }
 
   if (role === 'hr') {
     return [
-      { label: '当前周期', value: data.cycle_count || 0, icon: 'Calendar', color: '#409eff', link: '/cycles' },
-      { label: '待汇总', value: data.to_summary || 0, icon: 'TrendCharts', color: '#f56c6c', badge: data.to_summary > 0 ? 'urgent' : '', link: '/summary', highlight: true },
-      { label: '待审批', value: data.to_approve || 0, icon: 'DocumentChecked', color: '#e6a23c', badge: data.to_approve > 0 ? 'pending' : '', link: '/approval-workbench' },
-      { label: '待处理申诉', value: data.pending_appeals || 0, icon: 'Warning', color: '#67c23a', link: '/appeals' },
-      { label: '强制分布超标', value: data.force_distribution_exceeded || 0, icon: 'Flag', color: '#909399', link: '/distribution-review' },
+      { label: '当前周期', value: data.cycle_count || 0, icon: 'Calendar', color: '#6366f1', link: '/cycles' },
+      { label: '待汇总', value: data.to_summary || 0, icon: 'TrendCharts', color: '#ef4444', badge: data.to_summary > 0 ? 'urgent' : '', link: '/summary', highlight: true },
+      { label: '待审批', value: data.to_approve || 0, icon: 'DocumentChecked', color: '#f59e0b', badge: data.to_approve > 0 ? 'pending' : '', link: '/approval-workbench' },
+      { label: '待处理申诉', value: data.pending_appeals || 0, icon: 'Warning', color: '#10b981', link: '/appeals' },
+      { label: '强制分布超标', value: data.force_distribution_exceeded || 0, icon: 'Flag', color: '#64748b', link: '/distribution-review' },
     ]
   }
 
   if (role === 'manager') {
     return [
-      { label: '待评分', value: data.to_review || 0, icon: 'Edit', color: '#f56c6c', badge: data.to_review > 0 ? ' pending' : '', link: '/score-sheet', highlight: true },
-      { label: '待审批', value: data.to_approve || 0, icon: 'DocumentChecked', color: '#e6a23c', link: '/approval-workbench' },
-      { label: '待面谈', value: data.to_interview || 0, icon: 'ChatDotRound', color: '#67c23a', link: '/interviews' },
-      { label: '下属总数', value: data.subordinate_count || 0, icon: 'User', color: '#409eff', link: '/employees' },
+      { label: '待评分', value: data.to_review || 0, icon: 'Edit', color: '#ef4444', badge: data.to_review > 0 ? 'pending' : '', link: '/score-sheet', highlight: true },
+      { label: '待审批', value: data.to_approve || 0, icon: 'DocumentChecked', color: '#f59e0b', link: '/approval-workbench' },
+      { label: '待面谈', value: data.to_interview || 0, icon: 'ChatDotRound', color: '#10b981', link: '/interviews' },
+      { label: '下属总数', value: data.subordinate_count || 0, icon: 'User', color: '#6366f1', link: '/employees' },
     ]
   }
 
   if (role === 'employee') {
     return [
-      { label: '当前状态', value: statusText(data.self_status) || '无', icon: 'View', color: '#409eff' },
-      { label: '待自评', value: data.pending_self || 0, icon: 'Edit', color: '#f56c6c', badge: data.pending_self > 0 ? ' pending' : '', link: '/self-assessment', highlight: true },
-      { label: '历史考核', value: data.total_records || 0, icon: 'List', color: '#67c23a', link: '/my-performance' },
-      { label: '申诉记录', value: data.appeal_count || 0, icon: 'Warning', color: '#e6a23c', link: '/appeal' },
+      { label: '当前状态', value: statusText(data.self_status) || '无', icon: 'View', color: '#6366f1' },
+      { label: '待自评', value: data.pending_self || 0, icon: 'Edit', color: '#ef4444', badge: data.pending_self > 0 ? 'pending' : '', link: '/self-assessment', highlight: true },
+      { label: '历史考核', value: data.total_records || 0, icon: 'List', color: '#10b981', link: '/my-performance' },
+      { label: '申诉记录', value: data.appeal_count || 0, icon: 'Warning', color: '#f59e0b', link: '/appeal' },
     ]
   }
 
   if (role === 'peer') {
     return [
-      { label: '待协作评分', value: data.pending_reviews || 0, icon: 'Edit', color: '#f56c6c', badge: data.pending_reviews > 0 ? ' pending' : '', link: '/peer-review', highlight: true },
-      { label: '已完成', value: data.completed_reviews || 0, icon: 'Check', color: '#67c23a' },
-      { label: '总协作任务', value: data.total_reviews || 0, icon: 'List', color: '#409eff' },
+      { label: '待协作评分', value: data.pending_reviews || 0, icon: 'Edit', color: '#ef4444', badge: data.pending_reviews > 0 ? 'pending' : '', link: '/peer-review', highlight: true },
+      { label: '已完成', value: data.completed_reviews || 0, icon: 'Check', color: '#10b981' },
+      { label: '总协作任务', value: data.total_reviews || 0, icon: 'List', color: '#6366f1' },
     ]
   }
 
   if (role === 'executive') {
     return [
-      { label: '员工总数', value: data.employee_count || 0, icon: 'User', color: '#409eff' },
-      { label: '考核覆盖率', value: (data.coverage_rate || 0) + '%', icon: 'TrendCharts', color: '#67c23a' },
-      { label: '公司平均分', value: data.avg_score || 0, icon: 'Star', color: '#e6a23c' },
-      { label: '强制调整', value: data.adjusted_count || 0, icon: 'Warning', color: '#f56c6c' },
+      { label: '员工总数', value: data.employee_count || 0, icon: 'User', color: '#6366f1' },
+      { label: '考核覆盖率', value: (data.coverage_rate || 0) + '%', icon: 'TrendCharts', color: '#10b981' },
+      { label: '公司平均分', value: data.avg_score || 0, icon: 'Star', color: '#f59e0b' },
+      { label: '强制调整', value: data.adjusted_count || 0, icon: 'Warning', color: '#ef4444' },
     ]
   }
 
@@ -507,24 +513,72 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* Base layout */
 .dashboard-container {
-  padding: 20px;
+  padding: 0;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
-.flow-card {
-  margin-bottom: 20px;
+/* Hero Card: the main process flow card */
+.dashboard-hero-card {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: 24px 28px;
+  margin-bottom: 24px;
+  border: 1px solid var(--border-light);
 }
 
-.card-header {
+.hero-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 16px;
-  font-weight: bold;
+  margin-bottom: 20px;
 }
 
+.hero-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hero-title-text {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+}
+
+.hero-cycle-tag {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(99, 102, 241, 0.05) 100%);
+  color: var(--primary-color);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  letter-spacing: 0.3px;
+}
+
+.hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* Process Flow */
 .process-flow-wrapper {
-  padding: 20px 0;
+  padding: 24px 0 16px;
   overflow-x: auto;
 }
 
@@ -534,229 +588,641 @@ onMounted(async () => {
   align-items: flex-start;
   position: relative;
   min-width: 800px;
-  padding: 0 10px;
+  padding: 0 16px;
 }
 
 .flow-lines {
   position: absolute;
-  top: 35px;
-  left: 0;
-  right: 0;
+  top: 40px;
+  left: 60px;
+  right: 60px;
   display: flex;
   justify-content: space-between;
-  padding: 0 60px;
   z-index: 0;
   pointer-events: none;
+  gap: 8px;
 }
 
 .flow-line {
   flex: 1;
   height: 3px;
-  background: #e4e7ed;
-  margin: 0 10px;
-  transition: all 0.3s;
+  background: var(--border-light);
+  border-radius: 2px;
+  transition: all var(--transition-base);
+  position: relative;
+  overflow: hidden;
 }
 
-.flow-line.active {
-  background: #67c23a;
+.flow-line::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, var(--success-color) 0%, var(--success-color) 100%);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--transition-slow);
+  border-radius: 2px;
 }
 
+.flow-line.active::after {
+  transform: scaleX(1);
+}
+
+/* Stage Node */
 .stage-node {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 140px;
-  padding: 12px 8px;
-  border-radius: 12px;
+  width: 150px;
+  padding: 16px 12px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: all 0.3s;
-  background: #fff;
-  border: 2px solid #e4e7ed;
+  transition: all var(--transition-base);
+  background: var(--bg-card);
+  border: 2px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
 }
 
 .stage-node:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--primary-light);
 }
 
 .stage-node.active {
-  border-color: #409eff;
-  background: #ecf5ff;
+  border-color: var(--primary-color);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(99, 102, 241, 0.02) 100%);
+  box-shadow: var(--shadow-glow);
 }
 
 .stage-node.active .stage-icon {
-  background: #409eff;
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
   color: #fff;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
 }
 
 .stage-node.completed {
-  border-color: #67c23a;
-  background: #f0f9ff;
+  border-color: var(--success-color);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.06) 0%, rgba(16, 185, 129, 0.02) 100%);
 }
 
 .stage-node.completed .stage-icon {
-  background: #67c23a;
+  background: linear-gradient(135deg, var(--success-color) 0%, #059669 100%);
   color: #fff;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
 }
 
 .stage-node.current {
-  border-color: #e6a23c;
-  box-shadow: 0 0 0 4px rgba(230, 162, 60, 0.2);
-  animation: pulse 2s infinite;
+  border-color: var(--accent-color);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.06) 0%, rgba(245, 158, 11, 0.02) 100%);
+  animation: pulse-glow 2.5s infinite ease-in-out;
+}
+
+.stage-node.current .stage-icon {
+  background: linear-gradient(135deg, var(--accent-color) 0%, #d97706 100%);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
 }
 
 .stage-node.disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(230, 162, 60, 0.2); }
-  50% { box-shadow: 0 0 0 8px rgba(230, 162, 60, 0.1); }
+.stage-node.disabled:hover {
+  transform: none;
+  box-shadow: var(--shadow-sm);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15); }
+  50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0.08); }
 }
 
 .stage-badge {
   position: absolute;
-  top: -8px;
-  right: -8px;
+  top: -6px;
+  right: -6px;
   min-width: 22px;
   height: 22px;
   line-height: 22px;
   text-align: center;
   border-radius: 50%;
-  background: #f56c6c;
+  background: linear-gradient(135deg, var(--danger-color) 0%, #dc2626 100%);
   color: #fff;
-  font-size: 12px;
-  font-weight: bold;
+  font-size: 11px;
+  font-weight: 700;
   z-index: 2;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.3);
+  padding: 0 5px;
 }
 
 .stage-icon {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f5f7fa;
-  color: #909399;
+  background: var(--bg-color);
+  color: var(--text-muted);
   font-size: 18px;
-  font-weight: bold;
-  margin-bottom: 8px;
-  transition: all 0.3s;
+  font-weight: 700;
+  margin-bottom: 12px;
+  transition: all var(--transition-base);
 }
 
 .stage-title {
   font-size: 14px;
-  font-weight: bold;
-  color: #303133;
+  font-weight: 700;
+  color: var(--text-primary);
   margin-bottom: 4px;
-}
-
-.stage-desc {
-  font-size: 12px;
-  color: #909399;
   text-align: center;
 }
 
+.stage-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
 .stage-status {
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
+.status-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(245, 158, 11, 0.06) 100%);
+  color: var(--accent-color);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  letter-spacing: 0.3px;
+}
+
+/* Current Task Bar */
 .current-task-bar {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px dashed #dcdfe6;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--border-color);
 }
 
-.stats-row {
-  margin-bottom: 20px;
+.task-alert {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  transition: all var(--transition-fast);
+}
+
+.task-alert:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.task-alert.warning {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.06) 0%, rgba(245, 158, 11, 0.02) 100%);
+  border-color: rgba(245, 158, 11, 0.15);
+}
+
+.task-alert.error {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.06) 0%, rgba(239, 68, 68, 0.02) 100%);
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+.task-alert-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(245, 158, 11, 0.06) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-color);
+  flex-shrink: 0;
+}
+
+.task-alert.error .task-alert-icon {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(239, 68, 68, 0.06) 100%);
+  color: var(--danger-color);
+}
+
+.task-alert-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.task-alert-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.task-alert-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.task-alert-action {
+  flex-shrink: 0;
+}
+
+/* Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 20px;
+  margin-bottom: 24px;
 }
 
 .stat-card {
   position: relative;
   cursor: pointer;
-  transition: all 0.3s;
-  display: flex;
-  align-items: center;
-  padding: 16px;
+  transition: all var(--transition-base);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  overflow: hidden;
 }
 
 .stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-xl);
 }
 
 .stat-card.highlight {
-  border: 1px solid #f56c6c;
+  border-color: rgba(239, 68, 68, 0.2);
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.08);
 }
 
-.stat-icon {
-  margin-right: 12px;
+.stat-card.highlight:hover {
+  box-shadow: 0 8px 30px rgba(239, 68, 68, 0.12);
+}
+
+.stat-card-inner {
+  display: flex;
+  align-items: center;
+  padding: 20px;
+  position: relative;
+  z-index: 1;
+}
+
+.stat-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 16px;
+  flex-shrink: 0;
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--icon-color, var(--primary-color));
+  transition: all var(--transition-base);
+}
+
+.stat-card:hover .stat-icon-wrapper {
+  transform: scale(1.1) rotate(-4deg);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
 }
 
 .stat-info {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .stat-label {
-  font-size: 14px;
-  color: #909399;
-  margin-bottom: 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  letter-spacing: 0.2px;
 }
 
 .stat-value {
-  font-size: 24px;
-  font-weight: bold;
-  color: #303133;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1;
+  color: var(--icon-color, var(--primary-color));
+  transition: all var(--transition-base);
+}
+
+.stat-card:hover .stat-value {
+  transform: scale(1.05);
 }
 
 .stat-sublabel {
   font-size: 12px;
-  color: #c0c4cc;
+  color: var(--text-muted);
+  font-weight: 500;
   margin-top: 2px;
 }
 
 .stat-badge {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 12px;
+  right: 12px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--danger-color) 0%, #dc2626 100%);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.3);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  z-index: 1;
 }
 
-.mt-20 {
-  margin-top: 20px;
+.stat-card-glow {
+  position: absolute;
+  bottom: -40px;
+  right: -40px;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  filter: blur(40px);
+  opacity: 0.15;
+  transition: opacity var(--transition-base);
+  z-index: 0;
 }
 
-.card-title {
-  font-weight: bold;
+.stat-card:hover .stat-card-glow {
+  opacity: 0.25;
+}
+
+/* Dashboard Card (replaces el-card for tables and lists) */
+.dashboard-card {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  padding: 24px;
+  margin-bottom: 24px;
+  transition: all var(--transition-base);
+}
+
+.dashboard-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.card-header-custom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.card-header-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(99, 102, 241, 0.04) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-color);
+}
+
+.card-header-title {
   font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+}
+
+/* Quick Actions */
+.quick-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-base);
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+  position: relative;
+  overflow: hidden;
+}
+
+.action-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--border-light);
+  transition: all var(--transition-base);
+}
+
+.action-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.action-btn:hover::before {
+  height: 4px;
+}
+
+.action-btn.primary::before {
+  background: var(--primary-color);
+}
+.action-btn.success::before {
+  background: var(--success-color);
+}
+.action-btn.warning::before {
+  background: var(--accent-color);
+}
+.action-btn.danger::before {
+  background: var(--danger-color);
+}
+
+.action-label {
+  flex: 1;
+}
+
+.action-arrow {
+  color: var(--text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.action-btn:hover .action-arrow {
+  transform: translateX(3px);
+  color: var(--primary-color);
+}
+
+/* Custom Table */
+:deep(.custom-table) {
+  --el-table-border-color: var(--border-light);
+  --el-table-header-bg-color: var(--bg-color);
+  --el-table-row-hover-bg-color: rgba(99, 102, 241, 0.04);
+}
+
+:deep(.custom-table .el-table__header th) {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-secondary);
+  letter-spacing: 0.3px;
+  padding: 14px 12px;
+}
+
+:deep(.custom-table .el-table__row td) {
+  padding: 14px 12px;
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.table-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.type-tag {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--primary-color);
+  letter-spacing: 0.3px;
+}
+
+.type-tag.annual {
+  background: rgba(16, 185, 129, 0.08);
+  color: var(--success-color);
+}
+
+.status-tag {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  display: inline-block;
+  letter-spacing: 0.3px;
+}
+
+.status-tag.not_started {
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--text-muted);
+}
+.status-tag.pending_self,
+.status-tag.pending_manager,
+.status-tag.pending_peer {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--accent-color);
+}
+.status-tag.pending_summary,
+.status-tag.pending_approval {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary-color);
+}
+.status-tag.pending_interview {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--success-color);
+}
+.status-tag.published,
+.status-tag.archived {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--success-color);
+}
+.status-tag.cancelled {
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--text-muted);
+}
+
+.table-action-btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--primary-color);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.table-action-btn:hover {
+  background: var(--primary-color);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(99, 102, 241, 0.25);
+}
+
+/* Custom Progress */
+:deep(.custom-progress .el-progress-bar__outer) {
+  border-radius: 4px;
+  background: var(--border-light);
+}
+
+:deep(.custom-progress .el-progress-bar__inner) {
+  border-radius: 4px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .progress-placeholder {
-  color: #c0c4cc;
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
 }
 
-.progress-placeholder {
-  color: #c0c4cc;
-  font-size: 12px;
-}
-
+/* Mobile */
 @media (max-width: 768px) {
   .process-flow-wrapper {
     overflow-x: scroll;
   }
   .stage-node {
-    width: 110px;
-    padding: 8px 4px;
+    width: 120px;
+    padding: 12px 8px;
   }
   .stage-title {
     font-size: 12px;
   }
   .stage-desc {
     font-size: 10px;
+  }
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .quick-actions-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .hero-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .task-alert {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
   }
 }
 </style>

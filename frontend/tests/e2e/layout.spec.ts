@@ -134,7 +134,7 @@ test.describe('P0-18 Layout — 侧边栏与顶部栏', () => {
 
     const aside = page.locator('.layout-container > .el-aside')
     // 初始展开
-    await expect(aside).toHaveCSS('width', '210px')
+    await expect(aside).toHaveCSS('width', '240px')
 
     // 点击折叠
     await page.locator('.app-header .collapse-btn').click()
@@ -142,6 +142,6 @@ test.describe('P0-18 Layout — 侧边栏与顶部栏', () => {
 
     // 点击展开
     await page.locator('.app-header .collapse-btn').click()
-    await expect(aside).toHaveCSS('width', '210px')
+    await expect(aside).toHaveCSS('width', '240px')
   })
 })

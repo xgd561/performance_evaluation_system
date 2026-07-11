@@ -25,7 +25,7 @@ test.describe('员工仪表盘', () => {
   test('应显示最近考核周期表格', async ({ page }) => {
     await employeeLogin(page)
     await expect(page.getByText('最近考核周期')).toBeVisible()
-    await expect(page.locator('table')).toBeVisible()
+    await expect(page.locator('.custom-table')).toBeVisible()
   })
 
   test('快捷操作应显示员工常用操作', async ({ page }) => {

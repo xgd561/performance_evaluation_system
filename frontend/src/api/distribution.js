@@ -5,8 +5,7 @@ export function getDistributionAdjustments(cycleId) {
 }
 
 export function getDistributionOverrides(cycleId) {
-  const params = cycleId ? `?cycle_id=${cycleId}` : ''
-  return request.get(`/approvals/distribution-overrides${params}`)
+  return request.get('/approvals/distribution-overrides', { params: { cycle_id: cycleId } })
 }
 
 export function approveDistributionOverride(recordId) {

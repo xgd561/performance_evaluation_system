@@ -11,7 +11,7 @@ import { test, expect } from '@playwright/test'
 
 // --- Auth helpers ---
 async function getToken(page, username, password) {
-  const res = await page.request.post('/api/auth/login', {
+  const res = await page.request.post('/api/v1/auth/login', {
     headers: { 'Content-Type': 'application/json' },
     data: JSON.stringify({ username, password })
   })
@@ -146,17 +146,17 @@ test.describe('Employee 准入性场景', () => {
   test('登录后仪表盘显示员工专属统计与快捷操作', async ({ page }) => {
     await employeeLogin(page)
 
-    await expect(page.getByRole('heading', { name: '仪表盘' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '我的绩效首页' })).toBeVisible()
 
     // 员工专属统计卡片
-    await expect(page.locator('.stat-label').filter({ hasText: '考核记录' })).toBeVisible()
-    await expect(page.locator('.stat-label').filter({ hasText: '待自评' })).toBeVisible()
-    await expect(page.locator('.stat-label').filter({ hasText: '当前考核' })).toBeVisible()
     await expect(page.locator('.stat-label').filter({ hasText: '当前状态' })).toBeVisible()
+    await expect(page.locator('.stat-label').filter({ hasText: '待自评' })).toBeVisible()
+    await expect(page.locator('.stat-label').filter({ hasText: '历史考核' })).toBeVisible()
+    await expect(page.locator('.stat-label').filter({ hasText: '申诉记录' })).toBeVisible()
 
     // 快捷操作入口
     await expect(page.getByRole('button', { name: '进入自评' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '查看历史绩效' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '查看历史' })).toBeVisible()
     await expect(page.getByRole('button', { name: '发起申诉' })).toBeVisible()
   })
 

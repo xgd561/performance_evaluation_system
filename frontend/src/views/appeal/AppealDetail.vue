@@ -106,6 +106,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import PageContainer from '@/components/PageContainer.vue'
 import { getAppeal, resolveAppeal } from '@/api/appeals'
 import { getAssessmentDetail } from '@/api/scores'
 
@@ -197,6 +198,7 @@ async function submitResolve() {
     }
     await resolveAppeal(appeal.value.id, payload)
     ElMessage.success('复核处理成功')
+    await new Promise(resolve => setTimeout(resolve, 800))
     goBack()
   } catch (e) {
     console.error(e)

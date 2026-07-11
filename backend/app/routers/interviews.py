@@ -14,6 +14,7 @@ from app.models import (
 
 from app.routers.employees import _is_in_subordinate_chain, get_all_dept_ids
 from app.utils.workflow_state_machine import WorkflowStateMachine
+from app.routers.archive_guard import check_record_not_archived
 from app.services.notification_service import create_notification
 from app.core.exceptions import BizError
 
@@ -99,6 +100,8 @@ def create_interview(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    check_record_not_archived(record_id, db)
 
     current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
     if not current_employee:
@@ -194,6 +197,8 @@ def update_interview(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == record_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    check_record_not_archived(record_id, db)
 
     current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
     if not current_employee:
@@ -361,6 +366,8 @@ def submit_interview(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
+
+    check_record_not_archived(id, db)
 
     # 1. 校验状态
     if record.status != "pending_interview":

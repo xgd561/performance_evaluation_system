@@ -88,6 +88,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import PageContainer from '@/components/PageContainer.vue'
 import { getMyAssessment } from '@/api/scores'
 import { getMyAppeals, createAppeal } from '@/api/appeals'
 

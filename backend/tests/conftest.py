@@ -6,13 +6,23 @@ from sqlalchemy.orm import sessionmaker, Session
 
 from sqlalchemy import text
 
+import sys
+import tempfile
+import os
+
+# Force reload of app modules to pick up schema changes in models
+for mod_name in list(sys.modules.keys()):
+    if mod_name.startswith('app.'):
+        del sys.modules[mod_name]
+
 from app.main import app
 from app.database import get_db, Base
 from app.models import User, Employee, Department, Position
-from app.auth import get_password_hash
+from app.auth import get_password_hash, create_access_token
 
-# Use in-memory SQLite for tests
-TEST_DATABASE_URL = "sqlite:///:memory:"
+# Use file-based SQLite for tests (shared across connections)
+_db_file = tempfile.mktemp(suffix='.db')
+TEST_DATABASE_URL = f"sqlite:///{_db_file}"
 
 engine = create_engine(
     TEST_DATABASE_URL,
@@ -25,23 +35,12 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 @pytest.fixture(scope="function")
 def db_session():
     """Create a fresh database session for each test function."""
-    # Force drop all tables with foreign keys disabled to handle circular dependencies
-    with engine.begin() as conn:
-        conn.execute(text("PRAGMA foreign_keys=OFF"))
-        for table in reversed(Base.metadata.sorted_tables):
-            conn.execute(text(f"DROP TABLE IF EXISTS {table.name}"))
-        conn.execute(text("PRAGMA foreign_keys=ON"))
+    # Drop and recreate all tables
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    session = TestingSessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-        with engine.begin() as conn:
-            conn.execute(text("PRAGMA foreign_keys=OFF"))
-            for table in reversed(Base.metadata.sorted_tables):
-                conn.execute(text(f"DROP TABLE IF EXISTS {table.name}"))
-            conn.execute(text("PRAGMA foreign_keys=ON"))
+    conn = engine.connect()
+    session = Session(bind=conn)
+    return session
 
 
 @pytest.fixture(scope="function")
@@ -54,8 +53,28 @@ def client(db_session: Session):
             pass
 
     app.dependency_overrides[get_db] = override_get_db
+    # Temporarily remove startup handlers and lifespan to avoid re-initializing file DB
+    original_on_startup = app.router.on_startup.copy()
+    app.router.on_startup.clear()
+    from contextlib import asynccontextmanager
+    @asynccontextmanager
+    async def dummy_lifespan(app):
+        yield
+    original_lifespan = getattr(app.router, 'lifespan_context', None)
+    app.router.lifespan_context = dummy_lifespan
+    # Override app.database engine and SessionLocal so background tasks use test DB too
+    import app.database as app_database
+    original_database_engine = app_database.engine
+    original_database_sessionlocal = app_database.SessionLocal
+    app_database.engine = engine
+    app_database.SessionLocal = TestingSessionLocal
     with TestClient(app) as test_client:
         yield test_client
+    app.router.on_startup[:] = original_on_startup
+    if original_lifespan is not None:
+        app.router.lifespan_context = original_lifespan
+    app_database.engine = original_database_engine
+    app_database.SessionLocal = original_database_sessionlocal
     app.dependency_overrides.clear()
 
 
@@ -172,35 +191,29 @@ def employee_user(db_session: Session):
 
 
 @pytest.fixture(scope="function")
-def admin_token(client: TestClient, admin_user):
-    """Get admin access token."""
-    resp = client.post("/auth/login", json={"username": "admin", "password": "admin123"})
-    assert resp.status_code == 200
-    return resp.json()["access_token"]
+def admin_token(admin_user):
+    """Get admin access token (generated directly to avoid rate limits)."""
+    return create_access_token(data={"sub": admin_user.username})
 
 
 @pytest.fixture(scope="function")
-def hr_token(client: TestClient, hr_user):
-    """Get HR access token."""
-    resp = client.post("/auth/login", json={"username": "hr001", "password": "Hr001@123"})
-    assert resp.status_code == 200
-    return resp.json()["access_token"]
+def hr_token(hr_user):
+    """Get HR access token (generated directly to avoid rate limits)."""
+    return create_access_token(data={"sub": hr_user.username})
 
 
 @pytest.fixture(scope="function")
-def manager_token(client: TestClient, manager_user):
-    """Get manager access token."""
-    resp = client.post("/auth/login", json={"username": "mgr001", "password": "Mgr001@123"})
-    assert resp.status_code == 200
-    return resp.json()["access_token"]
+def manager_token(manager_user):
+    """Get manager access token (generated directly to avoid rate limits)."""
+    return create_access_token(data={"sub": manager_user.username})
 
 
 @pytest.fixture(scope="function")
-def employee_token(client: TestClient, employee_user):
-    """Get employee access token."""
-    resp = client.post("/auth/login", json={"username": "emp001", "password": "Emp001@123"})
-    assert resp.status_code == 200
-    return resp.json()["access_token"]
+def employee_token(employee_user):
+    """Get employee access token (generated directly to avoid rate limits)."""
+    # employee_user has is_first_login=True by default, which may block login.
+    # Direct token generation bypasses that check.
+    return create_access_token(data={"sub": employee_user.username})
 
 
 @pytest.fixture(scope="function")
@@ -228,11 +241,9 @@ def executive_user(db_session: Session):
 
 
 @pytest.fixture(scope="function")
-def executive_token(client: TestClient, executive_user):
-    """Get executive access token."""
-    resp = client.post("/auth/login", json={"username": "exec001", "password": "Exec001@123"})
-    assert resp.status_code == 200
-    return resp.json()["access_token"]
+def executive_token(executive_user):
+    """Get executive access token (generated directly to avoid rate limits)."""
+    return create_access_token(data={"sub": executive_user.username})
 
 
 @pytest.fixture(scope="function")
@@ -260,8 +271,6 @@ def peer_user(db_session: Session):
 
 
 @pytest.fixture(scope="function")
-def peer_token(client: TestClient, peer_user):
-    """Get peer access token."""
-    resp = client.post("/auth/login", json={"username": "peer001", "password": "Peer001@123"})
-    assert resp.status_code == 200
-    return resp.json()["access_token"]
+def peer_token(peer_user):
+    """Get peer access token (generated directly to avoid rate limits)."""
+    return create_access_token(data={"sub": peer_user.username})

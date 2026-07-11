@@ -9,9 +9,27 @@ export function exportCycleReport(cycleId) {
   return request.get(`/reports/cycle/${cycleId}/export`)
 }
 
-export function exportCycleReportExcel(cycleId) {
+export function exportCycleReportExcel(cycleId, departmentIds = []) {
   const token = localStorage.getItem('token')
-  return axios.get(`/api/reports/cycle/${cycleId}/export`, {
+  const params = new URLSearchParams()
+  if (departmentIds.length > 0) {
+    departmentIds.forEach(id => params.append('department_id', id))
+  }
+  return axios.get(`/api/v1/assessment-cycles/${cycleId}/export-excel?${params.toString()}`, {
+    responseType: 'blob',
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  })
+}
+
+export function exportCycleReportPdf(cycleId, departmentIds = []) {
+  const token = localStorage.getItem('token')
+  const params = new URLSearchParams()
+  if (departmentIds.length > 0) {
+    departmentIds.forEach(id => params.append('department_id', id))
+  }
+  return axios.get(`/api/v1/assessment-cycles/${cycleId}/archive-pdf?${params.toString()}`, {
     responseType: 'blob',
     headers: {
       Authorization: `Bearer ${token}`

@@ -233,7 +233,7 @@ def import_status(user: User = Depends(require_role("admin", "hr", "executive"))
 @router.get("")
 def list_employees(
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    size: int = Query(20, ge=1, le=1000),
     keyword: Optional[str] = None,
     department_id: Optional[int] = None,
     employee_no: Optional[str] = None,

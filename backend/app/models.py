@@ -78,6 +78,7 @@ class AssessmentCycle(Base):
     peer_review_enabled = Column(Boolean, default=True)
     approval_chain_config = Column(JSON, nullable=True)
     is_locked = Column(Boolean, default=False)
+    archived_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -119,8 +120,10 @@ class AssessmentRecord(Base):
     self_draft_scores = Column(JSON, nullable=True)
     peer_draft_scores = Column(JSON, nullable=True)
     manager_submitted = Column(Boolean, default=False)
+    is_locked = Column(Boolean, default=False)
     interview_record = Column(JSON, nullable=True)
     appeal_record = Column(JSON, nullable=True)
+    archive_pdf_path = Column(String(255), nullable=True)
     status = Column(String(50), default="pending_self")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -39,7 +39,7 @@ test.describe('P0 场景 — 仪表盘与系统配置', () => {
   test('仪表盘全局统计与角色隔离', async ({ page }) => {
     await adminLogin(page)
 
-    await expect(page.getByRole('heading', { name: '仪表盘' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '系统管理员工作台' })).toBeVisible()
 
     await expect(page.locator('.stat-label').filter({ hasText: '员工总数' })).toBeVisible()
     await expect(page.locator('.stat-label').filter({ hasText: '部门数量' })).toBeVisible()

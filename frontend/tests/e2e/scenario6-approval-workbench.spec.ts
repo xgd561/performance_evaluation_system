@@ -41,7 +41,7 @@ test.describe('审批工作台 — Manager Step 1 视图', () => {
     if (await firstRow.isVisible().catch(() => false)) {
       await firstRow.getByRole('button', { name: '查看详情' }).click()
       await page.waitForURL('**/approval-detail?record_id=*')
-      await expect(page).toHaveURL(/.*/approval-detail\?record_id=.*/)
+      await expect(page).toHaveURL(/.*\/approval-detail\?record_id=.*/)
       await expect(page.getByRole('heading', { name: '审批详情' })).toBeVisible()
     }
   })

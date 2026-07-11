@@ -178,12 +178,13 @@ test.describe('HR 场景', () => {
   test('登录后仪表盘显示全局统计', async ({ page }) => {
     await hrLogin(page)
 
-    await expect(page.getByRole('heading', { name: '仪表盘' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'HR 专员工作台' })).toBeVisible()
 
-    await expect(page.locator('.stat-label').filter({ hasText: '员工总数' })).toBeVisible()
-    await expect(page.locator('.stat-label').filter({ hasText: '部门数量' })).toBeVisible()
-    await expect(page.locator('.stat-label').filter({ hasText: '考核周期' })).toBeVisible()
-    await expect(page.locator('.stat-label').filter({ hasText: '进行中' })).toBeVisible()
+    await expect(page.locator('.stat-label').filter({ hasText: '当前周期' })).toBeVisible()
+    await expect(page.locator('.stat-label').filter({ hasText: '待汇总' })).toBeVisible()
+    await expect(page.locator('.stat-label').filter({ hasText: '待审批' })).toBeVisible()
+    await expect(page.locator('.stat-label').filter({ hasText: '待处理申诉' })).toBeVisible()
+    await expect(page.locator('.stat-label').filter({ hasText: '强制分布超标' })).toBeVisible()
 
     await expect(page.getByText('批量评分')).not.toBeVisible()
     await expect(page.getByText('进入自评')).not.toBeVisible()

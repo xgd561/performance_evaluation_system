@@ -177,7 +177,8 @@ async function loadPending() {
       params.force_adjust = true
     }
     if (filterForm.value.step) {
-      params.step = filterForm.value.step
+      const stepMap = { step1: 1, step2: 2 }
+      params.step = stepMap[filterForm.value.step] || filterForm.value.step
     }
     const res = await getPendingApprovals(params)
     pendingList.value = res || []
@@ -256,7 +257,7 @@ function goToDetail(row) {
 async function handleApprove(row) {
   try {
     await ElMessageBox.confirm('确认通过该员工的绩效结果？', '确认通过', { type: 'warning' })
-    await approveRecord(row.record_id, { comment: 'approved' })
+    await approveRecord(row.record_id, { comment: '审批通过，同意该员工的绩效结果。' })
     ElMessage.success('审批通过')
     loadPending()
     loadHistory()

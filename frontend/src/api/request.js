@@ -19,8 +19,18 @@ request.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`
     }
     if (import.meta.env?.MODE !== 'production') {
+      const url = new URL(config.url, window.location.origin + (config.baseURL || ''))
+      const params = new URLSearchParams()
+      if (config.params) {
+        for (const [key, value] of Object.entries(config.params)) {
+          if (value !== undefined && value !== null) {
+            params.append(key, value)
+          }
+        }
+      }
+      const paramStr = params.toString()
       console.log(
-        `[Request] ${config.method?.toUpperCase()} ${config.url}`,
+        `[Request] ${config.method?.toUpperCase()} ${url.pathname}${paramStr ? '?' + paramStr : ''}`,
         config.params || config.data
       )
     }

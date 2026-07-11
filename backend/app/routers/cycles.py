@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from collections import Counter
-from datetime import date
+from datetime import date, datetime
 import json
 
 from app.database import get_db
@@ -23,6 +23,12 @@ from app.schemas import (
 from app.services.operation_logger import log_operation
 from app.services.notification_service import create_notification
 from app.utils.workflow_state_machine import WorkflowStateMachine
+from app.utils.pdf_generator import generate_performance_pdf
+from app.services.pdf_archive_generator import generate_archive_pdf
+from app.utils.pdf_generator import generate_performance_pdf
+from app.utils.pdf_generator import generate_performance_pdf
+from app.utils.pdf_generator import generate_performance_pdf
+from app.utils.pdf_generator import generate_performance_pdf
 
 
 def _parse_json_field(value):
@@ -732,6 +738,7 @@ def cancel_cycle(
 @router.post("/{cycle_id}/archive")
 def archive_cycle(
     cycle_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user = Depends(require_role("admin", "hr")),
 ):
@@ -745,7 +752,34 @@ def archive_cycle(
 
     cycle.status = "archived"
     cycle.is_locked = True
+    cycle.archived_at = datetime.utcnow()
+
+    # Lock all assessment records in this cycle
+    records = db.query(AssessmentRecord).filter(AssessmentRecord.cycle_id == cycle_id).all()
+    for record in records:
+        record.is_locked = True
+
     db.commit()
+
+    # Trigger async PDF archive generation for each record
+    def _generate_pdfs_task(cid: int):
+        from app.database import SessionLocal
+        local_db = SessionLocal()
+        try:
+            recs = local_db.query(AssessmentRecord).filter(AssessmentRecord.cycle_id == cid).all()
+            for rec in recs:
+                try:
+                    path = generate_archive_pdf(rec.id, local_db)
+                    if path:
+                        rec.archive_pdf_path = path
+                except Exception:
+                    # 单条记录 PDF 生成失败不应影响其他记录
+                    pass
+            local_db.commit()
+        finally:
+            local_db.close()
+
+    background_tasks.add_task(_generate_pdfs_task, cycle_id)
 
     log_operation(
         db=db,
@@ -753,10 +787,141 @@ def archive_cycle(
         action="archive_cycle",
         target_type="assessment_cycle",
         target_id=cycle_id,
-        new_value={"status": "archived", "is_locked": True},
+        new_value={"status": "archived", "is_locked": True, "archived_at": cycle.archived_at.isoformat()},
     )
 
     return {"message": "考核周期已归档", "cycle_id": cycle_id}
+
+
+@router.post("/{cycle_id}/unarchive")
+def unarchive_cycle(
+    cycle_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin")),
+):
+    """解冻考核周期（仅 admin）"""
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
+
+    if cycle.status != "archived":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="只有已归档的考核周期才能解冻")
+
+    cycle.status = "published"
+    cycle.is_locked = False
+
+    # Unlock all assessment records in this cycle
+    records = db.query(AssessmentRecord).filter(AssessmentRecord.cycle_id == cycle_id).all()
+    for record in records:
+        record.is_locked = False
+
+    db.commit()
+
+    log_operation(
+        db=db,
+        user_id=user.id,
+        action="unarchive_cycle",
+        target_type="assessment_cycle",
+        target_id=cycle_id,
+        old_value={"status": "archived", "is_locked": True},
+        new_value={"status": "published", "is_locked": False},
+    )
+
+    return {"message": "考核周期已解冻", "cycle_id": cycle_id}
+
+
+@router.get("/{cycle_id}/export-excel")
+def export_cycle_excel(
+    cycle_id: int,
+    department_id: Optional[int] = Query(None, description="按部门筛选"),
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr", "executive")),
+):
+    """导出考核周期汇总报表 Excel"""
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
+    if not cycle:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核周期不存在")
+
+    query = db.query(AssessmentRecord).filter(AssessmentRecord.cycle_id == cycle_id)
+    if department_id is not None:
+        query = query.filter(AssessmentRecord.department_id == department_id)
+    records = query.all()
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from io import BytesIO
+    from urllib.parse import quote
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "考核汇总"
+
+    headers = ["工号", "姓名", "部门", "总分", "等级", "原始等级", "业绩分", "能力分", "态度分", "强制调整标记", "状态"]
+    ws.append(headers)
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center")
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin")
+    )
+
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+
+    for r in records:
+        emp = db.query(Employee).filter(Employee.id == r.employee_id).first()
+        dept = db.query(Department).filter(Department.id == r.department_id).first()
+        ws.append([
+            emp.employee_no if emp else "",
+            emp.name if emp else "",
+            dept.name if dept else "",
+            str(r.total_score) if r.total_score else "",
+            r.grade or "",
+            r.original_grade or "",
+            str(r.weighted_performance) if r.weighted_performance else "",
+            str(r.weighted_ability) if r.weighted_ability else "",
+            str(r.weighted_attitude) if r.weighted_attitude else "",
+            "是" if r.is_distribution_override else "否",
+            r.status or "",
+        ])
+
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=len(headers)):
+        for cell in row:
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter
+        for cell in col:
+            try:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            except Exception:
+                pass
+        adjusted_width = min(max_length + 2, 30)
+        ws.column_dimensions[column].width = adjusted_width
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"{cycle.name}_考核汇总.xlsx"
+    filename_encoded = quote(filename)
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}"
+        },
+    )
 
 
 @router.post("/{cycle_id}/publish")

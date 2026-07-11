@@ -202,6 +202,11 @@ function onCycleChange() {
   distribution.value = null
 }
 
+onMounted(() => {
+  loadCycles()
+  loadDepartments()
+})
+
 async function handleCalculate() {
   if (!queryForm.cycle_id) return
   try {

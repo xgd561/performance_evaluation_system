@@ -100,7 +100,7 @@ test.describe('员工自评场景 (P4-21)', () => {
     await employeeLogin(page)
 
     // 断言已进入员工仪表盘
-    await expect(page.locator('.card-header').filter({ hasText: '我的绩效首页' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '我的绩效首页' })).toBeVisible()
 
     // ========== Step 2: 进入自评页面 ==========
     // 通过快捷操作"进入自评"按钮直接进入自评页

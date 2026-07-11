@@ -5,6 +5,7 @@ from typing import List, Optional
 from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import AppealRecord, AssessmentRecord, Employee, User
+from app.routers.archive_guard import check_record_not_archived
 
 from app.services.notification_service import create_notification
 from app.services.operation_logger import log_operation
@@ -126,13 +127,19 @@ def create_appeal(
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="考核记录不存在")
 
+    check_record_not_archived(record_id, db)
+
     # P6-05: 仅 published 状态允许申诉
     if record.status != "published":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅已发布状态的考核记录可发起申诉")
 
-    # P6-05: 申诉理由长度校验
-    if len(reason) < 20 or len(reason) > 1000:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="申诉理由需在 20-1000 字之间")
+    # P6-05: 申诉理由和详细说明校验
+    if not reason or len(reason.strip()) == 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="申诉理由必填")
+    if len(reason) > 1000:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="申诉理由不超过1000字")
+    if not detail or len(detail.strip()) < 20:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="详细说明不少于20字")
 
     appeal = AppealRecord(
         record_id=record_id,
@@ -153,6 +160,7 @@ def create_appeal(
         "status": "pending",
         "created_at": appeal.created_at.isoformat() if appeal.created_at else None,
     }, ensure_ascii=False)
+    record.status = "appealed"
     db.commit()
 
     # P6-05: 通知 HR
@@ -193,6 +201,9 @@ def review_appeal(
     appeal = db.query(AppealRecord).filter(AppealRecord.id == appeal_id).first()
     if not appeal:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="申诉记录不存在")
+
+    if appeal.record_id:
+        check_record_not_archived(appeal.record_id, db)
 
     action = req.get("action")
     review_result = req.get("review_result")
@@ -261,6 +272,9 @@ def resolve_appeal(
     appeal = db.query(AppealRecord).filter(AppealRecord.id == appeal_id).first()
     if not appeal:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="申诉记录不存在")
+
+    if appeal.record_id:
+        check_record_not_archived(appeal.record_id, db)
 
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == appeal.record_id).first()
     if not record or record.status != "appealed":

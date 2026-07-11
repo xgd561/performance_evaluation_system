@@ -11,9 +11,9 @@ test.describe('高管仪表盘', () => {
     await executiveLogin(page)
   })
 
-  test('页面显示高管数据视图标题', async ({ page }) => {
+  test('页面显示高管仪表盘标题', async ({ page }) => {
     await page.goto('/dashboard')
-    await expect(page.getByText('高管数据视图')).toBeVisible()
+    await expect(page.getByText('部门筛选')).toBeVisible()
   })
 
   test('包含 4 个统计卡片', async ({ page }) => {

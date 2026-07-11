@@ -118,18 +118,18 @@ test.describe('Manager 准入性场景', () => {
   test('登录后仪表盘显示经理专属统计与快捷操作', async ({ page }) => {
     await managerLogin(page)
 
-    await expect(page.getByRole('heading', { name: '仪表盘' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '部门经理工作台' })).toBeVisible()
 
     // 经理专属统计卡片
-    await expect(page.locator('.stat-label').filter({ hasText: '下属人数' })).toBeVisible()
     await expect(page.locator('.stat-label').filter({ hasText: '待评分' })).toBeVisible()
     await expect(page.locator('.stat-label').filter({ hasText: '待审批' })).toBeVisible()
     await expect(page.locator('.stat-label').filter({ hasText: '待面谈' })).toBeVisible()
+    await expect(page.locator('.stat-label').filter({ hasText: '下属总数' })).toBeVisible()
 
     // 快捷操作入口
     await expect(page.getByRole('button', { name: '批量评分' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '审批下属绩效' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '记录面谈' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '审批确认' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '绩效面谈' })).toBeVisible()
   })
 
   test('可进入评分表页面', async ({ page }) => {
