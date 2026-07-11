@@ -16,20 +16,27 @@
       </div>
 
       <div class="process-flow-wrapper">
+        <!-- 6 阶段流程图 -->
         <div class="process-flow">
           <div
             v-for="(stage, index) in stages"
             :key="stage.key"
             class="stage-node"
             :class="{
-              'active': isRoleStage(stage.key),
               'completed': isCompleted(stage.key),
               'current': isCurrent(stage.key),
-              'disabled': !isRoleStage(stage.key) && !isCompleted(stage.key),
-              'role-stage': isRoleStage(stage.key)
+              'pending': !isCompleted(stage.key) && !isCurrent(stage.key),
+              'role-stage': isRoleStage(stage.key),
+              'no-role': !isRoleStage(stage.key)
             }"
             @click="handleStageClick(stage)"
           >
+            <!-- 职责角标 -->
+            <div class="role-badge" v-if="isRoleStage(stage.key)">
+              <el-icon size="12"><User /></el-icon>
+              我的职责
+            </div>
+            <!-- 待办数字 -->
             <div class="stage-badge" v-if="getBadgeCount(stage.key) > 0">
               {{ getBadgeCount(stage.key) }}
             </div>
@@ -39,22 +46,31 @@
             </div>
             <div class="stage-title">{{ stage.title }}</div>
             <div class="stage-desc">{{ stage.desc }}</div>
-            <div class="stage-status" v-if="isCurrent(stage.key) || (isRoleStage(stage.key) && !isCompleted(stage.key))">
-              <span class="status-pill" :class="{ 'role-pill': !isCurrent(stage.key) || isRoleStage(stage.key) }">
-                {{ isCurrent(stage.key) && isRoleStage(stage.key) ? '进行中 · 我的职责' : (isCurrent(stage.key) ? '进行中' : '我的职责') }}
+            <div class="stage-status">
+              <span class="status-pill" :class="stageStatusClass(stage.key)">
+                {{ stageStatusText(stage.key) }}
+              </span>
+              <span v-if="isRoleStage(stage.key) && !isCompleted(stage.key)" class="status-pill role-pill">
+                可操作
               </span>
             </div>
           </div>
-
           <!-- 连接线 -->
           <div class="flow-lines">
             <div
               v-for="n in 5"
               :key="n"
               class="flow-line"
-              :class="{ 'active': isLineActive(n) }"
+              :class="{ 'completed': isLineCompleted(n), 'active': isLineActive(n) }"
             ></div>
           </div>
+        </div>
+        <!-- 图例 -->
+        <div class="flow-legend">
+          <div class="legend-item"><span class="legend-dot completed"></span>已完成</div>
+          <div class="legend-item"><span class="legend-dot current"></span>进行中</div>
+          <div class="legend-item"><span class="legend-dot pending"></span>未开始</div>
+          <div class="legend-item"><span class="legend-dot role"></span>我的职责</div>
         </div>
       </div>
 
@@ -207,6 +223,27 @@ import request from '@/api/request'
 import ExecutiveDashboard from './ExecutiveDashboard.vue'
 
 const router = useRouter()
+// 阶段状态：completed | current | pending
+function stageStatus(key) {
+  if (isCompleted(key)) return 'completed'
+  if (isCurrent(key)) return 'current'
+  return 'pending'
+}
+
+function stageStatusClass(key) {
+  return stageStatus(key)
+}
+
+function stageStatusText(key) {
+  if (isCompleted(key)) return '已完成'
+  if (isCurrent(key)) return '进行中'
+  return '未开始'
+}
+
+function isLineCompleted(n) {
+  return isCompleted(stages[n - 1]?.key)
+}
+
 const authStore = useAuthStore()
 const loading = ref(false)
 
@@ -579,7 +616,7 @@ onMounted(async () => {
 
 /* Process Flow */
 .process-flow-wrapper {
-  padding: 24px 0 16px;
+  padding: 24px 0 8px;
   overflow-x: auto;
 }
 
@@ -588,15 +625,16 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: flex-start;
   position: relative;
-  min-width: 800px;
-  padding: 0 16px;
+  min-width: 900px;
+  padding: 28px 16px 12px;
 }
 
+/* 连接线：贯穿节点中心 */
 .flow-lines {
   position: absolute;
-  top: 40px;
-  left: 60px;
-  right: 60px;
+  top: 62px;
+  left: 110px;
+  right: 110px;
   display: flex;
   justify-content: space-between;
   z-index: 0;
@@ -606,10 +644,10 @@ onMounted(async () => {
 
 .flow-line {
   flex: 1;
-  height: 3px;
-  background: var(--border-light);
+  height: 4px;
+  background: #e2e8f0;
   border-radius: 2px;
-  transition: all var(--transition-base);
+  transition: all 0.4s ease;
   position: relative;
   overflow: hidden;
 }
@@ -621,15 +659,20 @@ onMounted(async () => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(90deg, var(--success-color) 0%, var(--success-color) 100%);
+  background: linear-gradient(90deg, #10b981 0%, #10b981 100%);
   transform: scaleX(0);
   transform-origin: left;
-  transition: transform var(--transition-slow);
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
   border-radius: 2px;
 }
 
-.flow-line.active::after {
+.flow-line.active::after,
+.flow-line.completed::after {
   transform: scaleX(1);
+}
+
+.flow-line.active:not(.completed)::after {
+  background: linear-gradient(90deg, #10b981 0%, #6366f1 100%);
 }
 
 /* Stage Node */
@@ -639,90 +682,102 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 150px;
+  width: 146px;
   padding: 16px 12px;
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition: all var(--transition-base);
   background: var(--bg-card);
-  border: 2px solid var(--border-light);
+  border: 2px solid #e2e8f0;
   box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
-/* 角色职责顶部标识条 — 不受 completed/current 覆盖 */
+/* 职责角标 */
+.role-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: linear-gradient(90deg, #6366f1 0%, #818cf8 100%);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  z-index: 2;
+}
+
 .stage-node.role-stage {
-  border-color: var(--primary-color) !important;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2), var(--shadow-sm);
+  padding-top: 28px;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15), var(--shadow-sm);
 }
 
 .stage-node.role-stage:hover {
-  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3), var(--shadow-lg);
-}
-
-.stage-node:hover {
   transform: translateY(-4px);
-  box-shadow: var(--shadow-lg);
-  border-color: var(--primary-light);
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.25), var(--shadow-lg);
 }
 
-.stage-node.active {
-  border-color: var(--primary-color);
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(99, 102, 241, 0.02) 100%);
-  box-shadow: var(--shadow-glow);
+.stage-node.no-role {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
-.stage-node.active .stage-icon {
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+.stage-node.no-role:hover {
+  transform: none;
+  box-shadow: var(--shadow-sm);
 }
 
 .stage-node.completed {
-  border-color: var(--success-color);
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.06) 0%, rgba(16, 185, 129, 0.02) 100%);
+  border-color: #10b981;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.02) 100%);
 }
 
 .stage-node.completed .stage-icon {
-  background: linear-gradient(135deg, var(--success-color) 0%, #059669 100%);
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   color: #fff;
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
 }
 
 .stage-node.current {
-  border-color: var(--accent-color);
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.06) 0%, rgba(245, 158, 11, 0.02) 100%);
+  border-color: #6366f1;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(99, 102, 241, 0.02) 100%);
   animation: pulse-glow 2.5s infinite ease-in-out;
 }
 
 .stage-node.current .stage-icon {
-  background: linear-gradient(135deg, var(--accent-color) 0%, #d97706 100%);
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
   color: #fff;
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
 }
 
-.stage-node.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.stage-node.pending {
+  border-color: #e2e8f0;
+  background: #f8fafc;
 }
 
-.stage-node.disabled:hover {
-  transform: none;
-  box-shadow: var(--shadow-sm);
+.stage-node.pending .stage-icon {
+  background: #f1f5f9;
+  color: #94a3b8;
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15); }
-  50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0.08); }
+  0%, 100% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15); }
+  50% { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0.06); }
 }
 
 .stage-badge {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  min-width: 22px;
-  height: 22px;
-  line-height: 22px;
+  top: 6px;
+  right: 6px;
+  min-width: 20px;
+  height: 20px;
+  line-height: 20px;
   text-align: center;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--danger-color) 0%, #dc2626 100%);
@@ -731,21 +786,21 @@ onMounted(async () => {
   font-weight: 700;
   z-index: 2;
   box-shadow: 0 2px 6px rgba(239, 68, 68, 0.3);
-  padding: 0 5px;
+  padding: 0 4px;
 }
 
 .stage-icon {
-  width: 52px;
-  height: 52px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-color);
-  color: var(--text-muted);
-  font-size: 18px;
+  background: #f1f5f9;
+  color: #94a3b8;
+  font-size: 16px;
   font-weight: 700;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   transition: all var(--transition-base);
 }
 
@@ -763,29 +818,91 @@ onMounted(async () => {
   text-align: center;
   line-height: 1.4;
   font-weight: 500;
+  margin-bottom: 8px;
 }
 
 .stage-status {
-  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+  margin-top: 2px;
 }
 
 .status-pill {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  padding: 3px 10px;
+  padding: 3px 8px;
   border-radius: 20px;
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(245, 158, 11, 0.06) 100%);
-  color: var(--accent-color);
-  border: 1px solid rgba(245, 158, 11, 0.2);
   letter-spacing: 0.3px;
 }
 
-.status-pill.role-pill {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(99, 102, 241, 0.06) 100%);
-  color: var(--primary-color);
+.status-pill.completed {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.status-pill.current {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4f46e5;
   border: 1px solid rgba(99, 102, 241, 0.2);
 }
 
+.status-pill.pending {
+  background: rgba(148, 163, 184, 0.12);
+  color: #64748b;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.status-pill.role-pill {
+  background: rgba(99, 102, 241, 0.12);
+  color: #6366f1;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+/* Flow Legend */
+.flow-legend {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.legend-dot.completed {
+  background: #10b981;
+}
+
+.legend-dot.current {
+  background: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.legend-dot.pending {
+  background: #cbd5e1;
+}
+
+.legend-dot.role {
+  background: #6366f1;
+  border-radius: 2px;
+}
 /* Current Task Bar */
 .current-task-bar {
   margin-top: 20px;
