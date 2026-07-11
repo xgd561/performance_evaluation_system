@@ -2533,37 +2533,43 @@ def mask_id_card(id_card: str) -> str:
 
 ## 7. 项目目录结构
 
-> 以下目录结构基于 **4 层后端架构**（Router → Service → Repository → Infrastructure）和 Vue 3 前端工程化最佳实践设计，与第 2 章系统架构、第 4 章接口清单、第 5 章核心算法、第 6 章安全设计完全对应。
+> 以下目录结构反映当前仓库实际文件布局，已把 PRD/TECH/验收/知识库等文档集中迁移到 `docs/`；后端采用 Router → Service → Model/Schema 的扁平化分层；前端为 Vue 3 + Element Plus 工程化项目。
 
 ```
 performance_evaluation_system/
-├── PRD_绩效考核评分系统_v1.0.md       # 产品需求文档（根级，与 TECH 同级）
-├── TECH_绩效考核评分系统_v1.0.md      # 技术方案文档（本文件）
-├── README.md                           # 项目启动、环境配置、部署说明
-├── requirements.md                     # 系统依赖（Python/Node 版本）
+├── docs/                               # 项目文档（已集中）
+│   ├── PRD_绩效考核评分系统_v1.0.md
+│   ├── TECH_绩效考核评分系统_v1.0.md   # 本文件
+│   ├── ACCEPTANCE_REPORT.md
+│   ├── DEV_TODO_LIST.md
+│   ├── KNOWLEDGE_BASE.md
+│   └── e2e-review-admin.md
 │
-├── backend/                            # FastAPI 后端（4 层架构）
+├── backend/                            # FastAPI 后端
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── main.py                     # 应用入口：注册路由、中间件、生命周期事件
-│   │   │
+│   │   ├── auth.py                     # 登录 / 登出 / Token 刷新 / 密码修改（兼容旧位置）
+│   │   ├── database.py                 # SQLAlchemy Engine / Session / 连接池
+│   │   ├── dependencies.py             # 依赖注入：当前用户、权限校验、DB Session
+│   │   ├── models.py                   # SQLAlchemy ORM 模型定义
+│   │   └── schemas.py                  # Pydantic 请求 / 响应 DTO
+│   │
 │   │   ├── core/                       # 核心基础设施（跨层共享）
+│   │   │   ├── constants.py            # 常量：角色 / 状态 / 等级枚举
+│   │   │   ├── dependencies.py         # 核心依赖注入：Token 校验、角色校验
+│   │   │   ├── exceptions.py           # 自定义异常：BizError、AuthError、ValidationError
+│   │   │   ├── response.py             # 统一响应封装：code / data / message
+│   │   │   └── security.py             # JWT 编解码、密码哈希（bcrypt）
+│   │
+│   │   ├── routers/                    # API 路由（与第 4 章接口 1:1 对应）
 │   │   │   ├── __init__.py
-│   │   │   ├── config.py             # 环境配置：数据库URL、JWT密钥、超参、开关
-│   │   │   ├── exceptions.py         # 自定义异常：BizError、AuthError、ValidationError
-│   │   │   ├── middleware.py         # 中间件：CORS、请求日志、错误拦截、耗时统计
-│   │   │   ├── scheduler.py          # APScheduler 初始化：截止提醒、逾期标记、归档清理
-│   │   │   ├── security.py           # JWT 编解码、密码哈希（bcrypt）、Token 刷新
-│   │   │   └── events.py             # 生命周期：启动/关闭事件（数据库连接、调度器启动）
-│   │   │
-│   │   ├── routers/                    # 第 1 层：API 路由（与第 4 章接口 1:1 对应）
-│   │   │   ├── __init__.py
-│   │   │   ├── auth.py               # 登录 / 登出 / Token 刷新 / 密码修改
-│   │   │   ├── users.py              # 当前用户：GET /users/me、修改密码
+│   │   │   ├── auth.py                 # 登录 / 登出 / Token 刷新 / 密码修改
 │   │   │   ├── employees.py          # 员工 CRUD / 导入 / 导出 / 直属下属
 │   │   │   ├── departments.py        # 部门 / 岗位 / 部门负责人
 │   │   │   ├── cycles.py             # 考核周期 / 发布 / 归档 / 批量催办 / 部门配置
 │   │   │   ├── scores.py             # 评分提交 / 草稿 / 加权计算 / 分布推荐 / 分布确认
+│   │   │   ├── score_drafts.py       # 评分明细草稿相关接口
 │   │   │   ├── approvals.py          # 审批链 / 审批提交 / 审批历史
 │   │   │   ├── appeals.py            # 申诉提交 / 复核 / 重算
 │   │   │   ├── interviews.py         # 面谈记录 / 确认
@@ -2574,239 +2580,199 @@ performance_evaluation_system/
 │   │   │   ├── dashboard.py          # 仪表盘统计 / 待办聚合
 │   │   │   ├── logs.py               # 操作日志查询 / 审计
 │   │   │   ├── notifications.py      # 通知列表 / 已读 / 一键已读
-│   │   │   └── archive.py            # 归档锁定 / PDF 下载 / 历史档案
-│   │   │
-│   │   ├── services/                   # 第 2 层：业务逻辑（与第 5 章算法对应）
-│   │   │   ├── __init__.py
-│   │   │   ├── score_calculator.py     # 5.1 加权计算 + 5.7 仪表盘统计
-│   │   │   ├── grade_mapper.py         # 5.2 等级映射 + 5.8 历史趋势
-│   │   │   ├── distribution_enforcer.py # 5.3 分布校验 + 5.5 强制分布执行
-│   │   │   ├── anomaly_detector.py     # 5.3 异常检测（分差 / 空评）
-│   │   │   ├── kpi_aggregator.py       # 5.6 KPI 聚合（按维度 / 按指标）
-│   │   │   ├── workflow_state_machine.py # 5.4 状态机（10 状态流转）
-│   │   │   ├── approval_chain_router.py # 5.11 审批链路由
-│   │   │   ├── appeal_recalculator.py   # 5.12 申诉重算
-│   │   │   ├── score_draft_merger.py    # 5.14 分数草稿合并
-│   │   │   ├── employee_import_validator.py # 5.9 员工导入校验
-│   │   │   ├── peer_assignment_validator.py # 5.10 协作人分配校验
-│   │   │   ├── notification_rule_engine.py # 5.13 通知规则引擎
-│   │   │   ├── pdf_archive_generator.py   # 5.15 PDF 归档生成
-│   │   │   └── report_builder.py          # 报表构建（分布 / 趋势 / 汇总）
-│   │   │
-│   │   ├── repositories/               # 第 3 层：数据访问（Repository 模式）
-│   │   │   ├── __init__.py
-│   │   │   ├── base.py               # 通用 CRUD：BaseRepository（create/get/list/update/delete）
-│   │   │   ├── employee_repo.py      # 员工 / 直属下级查询
-│   │   │   ├── department_repo.py    # 部门 / 岗位 / 负责人
-│   │   │   ├── cycle_repo.py         # 周期 / 周期人员 / 周期部门
-│   │   │   ├── record_repo.py        # 考核记录 / 状态筛选
-│   │   │   ├── score_repo.py         # 评分明细 / 草稿 / 聚合
-│   │   │   ├── approval_repo.py      # 审批记录 / 待办 / 历史
-│   │   │   ├── appeal_repo.py        # 申诉 / 复核
-│   │   │   ├── interview_repo.py     # 面谈记录
-│   │   │   ├── peer_repo.py          # 协作人 / 待评
-│   │   │   ├── config_repo.py        # 系统配置 / 等级规则
-│   │   │   ├── notification_repo.py  # 通知 / 已读状态
-│   │   │   └── log_repo.py           # 操作日志
-│   │   │
-│   │   ├── infrastructure/             # 第 4 层：基础设施
-│   │   │   ├── __init__.py
-│   │   │   ├── database.py           # SQLAlchemy Engine / Session / 连接池（原 app/database.py 迁入）
-│   │   │   ├── file_storage.py       # 本地文件上传 / 下载 / 路径管理
-│   │   │   ├── pdf_engine.py         # PDF 渲染引擎（Playwright / WeasyPrint 封装）
-│   │   │   ├── notification_sender.py # 站内信发送（数据库写入）+ 邮件发送（可选扩展）
-│   │   │   ├── excel_parser.py       # Excel 读取 / 模板解析
-│   │   │   └── scheduler_jobs.py     # 定时任务具体 Job：deadline_reminder、overdue_marker、auto_archive
-│   │   │
+│   │   │   ├── archive_guard.py      # 归档锁定 / 防篡改 / 一致性校验
+│   │   │   └── health.py             # 健康检查 / 服务存活探针
+│   │
+│   │   ├── services/                   # 业务逻辑（与第 5 章算法对应）
+│   │   │   ├── config_service.py       # 系统配置服务 / 配置校验
+│   │   │   ├── distribution_enforcer.py # 强制分布执行：推荐 + 确认 + 小部门豁免
+│   │   │   ├── notification_service.py # 通知生成 / 站内信持久化
+│   │   │   ├── operation_logger.py     # 操作日志统一记录入口
+│   │   │   ├── pdf_archive_generator.py # PDF 归档 / 绩效档案生成
+│   │   │   └── score_calculator.py     # 加权计算、等级映射、汇总统计
+│   │
 │   │   └── utils/                      # 工具函数（无状态、纯函数）
 │   │       ├── __init__.py
-│   │       ├── data_masking.py       # 6.6 数据脱敏（手机 / 邮箱 / 身份证）
-│   │       ├── audit_logger.py       # 6.7 审计日志记录（写入 operation_logs 表）
-│   │       ├── password_utils.py     # 6.9 密码强度校验 / 默认密码检测
-│   │       ├── validators.py         # 通用校验：手机号 / 邮箱 / 工号 / 日期
-│   │       ├── formatters.py         # 格式化：分数 / 百分比 / 日期
-│   │       ├── excel_import.py       # Excel 导入预览 + 校验 + 错误报告
-│   │       ├── excel_export.py       # Excel 导出（报表 / 模板）
-│   │       └── pdf_generator.py      # PDF 单页生成（如绩效通知单）
+│   │       ├── audit_logger.py         # 6.7 审计日志记录（写入 operation_logs 表）
+│   │       ├── data_masking.py         # 6.6 数据脱敏（手机 / 邮箱 / 身份证）
+│   │       ├── pdf_generator.py        # PDF 单页生成（如绩效通知单）
+│   │       └── workflow_state_machine.py # 5.4 状态机（10 状态流转）
 │   │
-│   ├── alembic/                        # 数据库迁移脚本
-│   │   ├── versions/                 # 版本文件
-│   │   └── env.py
-│   ├── tests/                          # 后端单元/集成测试（pytest）
+│   ├── scripts/
+│   │   └── init_db.py                  # 数据库初始化 / 创建管理员 / 默认配置
+│   │
+│   ├── tests/                          # 后端单元 / 集成 / E2E 测试（pytest）
 │   │   ├── __init__.py
-│   │   ├── conftest.py               # 共享 Fixture：TestClient、内存数据库、认证 Token
-│   │   ├── test_auth.py
-│   │   ├── test_users.py
-│   │   ├── test_employees.py
-│   │   ├── test_departments.py
-│   │   ├── test_cycles.py
-│   │   ├── test_scores.py
-│   │   ├── test_approvals.py
-│   │   ├── test_appeals.py
-│   │   ├── test_interviews.py
-│   │   ├── test_peers.py
-│   │   ├── test_reports.py
-│   │   ├── test_kpi_templates.py
-│   │   ├── test_config.py
-│   │   ├── test_dashboard.py
-│   │   ├── test_notifications.py
-│   │   ├── test_archive.py
-│   │   ├── test_logs.py
-│   │   └── test_distribution.py
+│   │   ├── conftest.py                 # 共享 Fixture：TestClient、内存数据库、Token
+│   │   ├── README.md
+│   │   └── test_*.py                   # 按模块组织的测试用例（约 80+ 文件）
+│   │
 │   ├── requirements.txt                # Python 依赖
-│   └── run_tests.bat                 # Windows 一键测试脚本
+│   ├── clean_db.py                     # 数据库清理脚本
+│   ├── restart.bat                     # Windows 后端重启脚本
+│   ├── restart.sh                      # Linux 后端重启脚本
+│   ├── run_tests.bat                   # Windows 一键测试脚本
+│   ├── package.json                    # 后端 Node 依赖（Playwright 等）
+│   └── package-lock.json
 │
 ├── frontend/                           # Vue 3 前端（工程化）
-│   ├── public/
 │   ├── index.html
 │   ├── package.json
 │   ├── vite.config.js
+│   ├── vitest.config.js
+│   ├── playwright.config.ts
+│   ├── tsconfig.json
+│   ├── tsconfig.node.json
 │   └── src/
+│       ├── main.js                     # 应用入口：路由 / Pinia / Element Plus 注册
+│       ├── App.vue
+│       │
 │       ├── api/                        # Axios 封装：按后端路由 1:1 映射
-│       │   ├── request.js            # Axios 实例 / 拦截器（Token / 错误 / 提示）
+│       │   ├── request.js              # Axios 实例 / 拦截器（Token / 错误 / 提示）
 │       │   ├── auth.js
-│       │   ├── users.js
 │       │   ├── employees.js
 │       │   ├── departments.js
 │       │   ├── cycles.js
 │       │   ├── scores.js
+│       │   ├── score-sheet-list.js
 │       │   ├── approvals.js
 │       │   ├── appeals.js
 │       │   ├── interviews.js
 │       │   ├── peers.js
 │       │   ├── reports.js
 │       │   ├── kpi-templates.js
-│       │   ├── kpi-adjustment.js
+│       │   ├── kpiAdjustment.js
 │       │   ├── distribution.js
 │       │   ├── config.js
-│       │   ├── dashboard.js
 │       │   ├── logs.js
-│       │   └── notifications.js
-│       │
-│       ├── assets/                     # 静态资源：图片 / 字体 / 全局样式
-│       │   └── styles/
-│       │       ├── variables.css     # CSS 变量（主题色 / 间距）
-│       │       └── index.css         # 全局重置 + Element Plus 覆盖
+│       │   └── ...                     # 其他业务接口模块
 │       │
 │       ├── components/                 # 全局公共组件
 │       │   ├── AppHeader.vue
 │       │   ├── AppSidebar.vue
 │       │   ├── PageContainer.vue
 │       │   ├── BreadcrumbNav.vue
-│       │   ├── Layout.vue
-│       │   └── charts/               # ECharts 封装
-│       │       ├── TrendChart.vue
-│       │       ├── DistributionPie.vue
-│       │       └── ScoreBarChart.vue
+│       │   └── Layout.vue
 │       │
-│       ├── composables/                # Vue 3 Composition 复用逻辑
-│       │   ├── useAuth.js            # 当前用户 / 权限判断
-│       │   ├── usePermission.js      # 按钮级权限（v-permission）
-│       │   ├── useTable.js           # 分页 / 排序 / 筛选
-│       │   └── useForm.js            # 表单提交 / 重置 / 校验
-│       │
-│       ├── directives/                 # 自定义指令
-│       │   └── permission.js         # v-permission 角色/权限指令
-│       │
-│       ├── plugins/                    # 第三方库全局注册
-│       │   ├── element-plus.js       # Element Plus 组件 / 图标按需注册
-│       │   └── echarts.js            # ECharts 图表库注册
+│       ├── constants/                  # 业务常量 / 枚举
+│       │   └── scoringAnchors.js       # 评分锚点 / 等级阈值配置
 │       │
 │       ├── router/                     # Vue Router
-│       │   ├── index.js              # 路由表 + 导航守卫（第 6.5 章）
-│       │   └── routes.js             # 路由定义（按模块分组）
+│       │   └── index.js                # 路由表 + 导航守卫（第 6.5 章）
 │       │
 │       ├── stores/                     # Pinia 状态管理
-│       │   ├── auth.js               # 用户认证 / Token / 权限
-│       │   └── app.js                # 全局状态：侧边栏 / 主题 / 消息未读数
+│       │   ├── auth.js                 # 用户认证 / Token / 权限
+│       │   └── app.js                  # 全局状态：侧边栏 / 主题 / 消息未读数
 │       │
-│       ├── types/                      # TypeScript 类型定义（JS 项目保留 .d.ts 或 JSDoc）
-│       │   ├── api.ts                # 后端 API 请求/响应类型
-│       │   └── models.ts             # 业务实体类型
+│       ├── styles/                     # 全局样式与 CSS 变量
+│       │   ├── index.css
+│       │   └── variables.css
 │       │
 │       ├── utils/                      # 前端工具函数
-│       │   ├── auth.js               # Token 存取 / 权限解析
-│       │   ├── constants.js          # 枚举：角色 / 考核状态 / 审批状态
-│       │   ├── date.js               # 日期格式化 / 考核周期计算
-│       │   ├── format.js             # 分数 / 百分比 / 千分位
-│       │   └── validators.js         # 前端校验：手机号 / 邮箱 / 密码强度
+│       │   ├── auth.js                 # Token 存取 / 权限解析
+│       │   └── constants.js            # 枚举：角色 / 考核状态 / 审批状态
 │       │
-│       ├── views/                      # 页面视图（与路由 1:1）
-│       │   ├── login/                # 登录页
-│       │   ├── dashboard/            # 首页仪表盘（按角色渲染）
-│       │   ├── employees/            # 员工管理 / 导入
-│       │   ├── departments/          # 部门与岗位管理
-│       │   ├── cycles/               # 考核周期管理
-│       │   ├── kpi-templates/        # KPI 模板
-│       │   ├── config/               # 系统配置（等级规则 / 权重 / 豁免）
-│       │   ├── score-sheet/          # 评分页（自评 / 上级评 / 协作评）
-│       │   ├── my-performance/       # 我的绩效（历史趋势 / 档案 / 申诉）
-│       │   ├── summary/              # 分数汇总与强制分布处理
-│       │   ├── distribution-review/  # 强制分布处理（HR 专用）
-│       │   ├── approval-workbench/   # 审批工作台
-│       │   ├── peer-review/          # 协作评分待办
-│       │   ├── interview/            # 绩效面谈
-│       │   ├── appeal/               # 申诉提交与跟踪
-│       │   ├── notifications/        # 通知收件箱（对应 4 章通知接口）
-│       │   ├── audit/                # 操作日志审计
-│       │   └── reports/              # 报表分析（分布图 / 趋势图 / 导出）
-│       │
-│       ├── App.vue
-│       └── main.js
+│       └── views/                      # 页面视图（与路由 1:1）
+│           ├── login/                  # 登录页
+│           ├── dashboard/              # 首页仪表盘（按角色渲染）
+│           │   ├── DashboardView.vue
+│           │   └── ExecutiveDashboard.vue
+│           ├── employees/              # 员工管理 / 导入
+│           ├── departments/            # 部门与岗位管理
+│           ├── positions/              # 岗位管理
+│           ├── cycles/                 # 考核周期管理
+│           ├── kpi-templates/          # KPI 模板
+│           ├── kpi-adjustment/         # KPI 调整申请与审批
+│           ├── config/                 # 系统配置（等级规则 / 权重 / 豁免）
+│           ├── score-sheet/            # 评分页（自评 / 上级评 / 协作评）
+│           ├── self-assessment/        # 自评页面
+│           ├── my-performance/         # 我的绩效（历史趋势 / 档案 / 申诉）
+│           ├── summary/                # 分数汇总与强制分布处理
+│           ├── distribution-review/    # 强制分布处理（HR 专用）
+│           ├── approval-workbench/     # 审批工作台
+│           ├── peer-review/            # 协作评分待办
+│           ├── interview/              # 绩效面谈
+│           ├── appeal/                 # 申诉提交与跟踪
+│           ├── audit/                  # 操作日志审计
+│           ├── reports/                # 报表分析（分布图 / 趋势图 / 导出）
+│           └── error/                  # 403 等错误页
 │
-├── tests/                              # 系统级测试（与 backend/tests 分离）
+├── tests/                              # 系统级测试 / 用例 / 设计文档
 │   ├── design/
 │   │   └── TEST_DESIGN_绩效考核评分系统_v1.0.md
 │   ├── cases/
-│   │   ├── TEST_CASES.md
-│   │   └── TEST_CASES_supplement.md
+│   │   ├── TEST_CASES_绩效考核评分系统_v1.0.md
+│   │   ├── TEST_CASES_supplement.md
+│   │   ├── _gen_cases.py
+│   │   ├── _test.py
+│   │   └── _verify.py
 │   └── scripts/                        # 历史测试脚本（可逐步迁移到 backend/tests）
 │       ├── conftest.py
 │       ├── utils.py
 │       └── test_*.py
 │
+├── scripts/                            # 运维脚本
+│   ├── init_db.py                      # 首次部署初始化（创建管理员 / 默认配置）
+│   ├── restart.bat                     # Windows 后端重启（tskill + uvicorn）
+│   ├── backup.bat                      # 数据库 + 归档文件备份
+│   ├── fix_acceptance.py               # 验收报告修复脚本
+│   ├── update_acceptance.py            # 验收报告更新脚本
+│   ├── update_sections_9_10.py         # 文档章节更新脚本
+│   ├── update_db_path.py               # 数据库路径更新脚本
+│   ├── migrate_db_path.py              # 数据库路径迁移脚本
+│   ├── verify_p0_01.bat
+│   └── verify_p0_01.sh
+│
 ├── data/                               # 运行时数据（不提交 Git）
-│   ├── uploads/                        # 员工导入 Excel
-│   ├── archives/                       # PDF 绩效档案
-│   └── db/                             # SQLite 数据库文件
-│
 ├── logs/                               # 运行时日志
-│   ├── app.log                         # 应用日志
-│   └── audit/                          # 审计日志
+├── backups/                            # 数据库与归档备份
+├── test-results/                       # 测试产物与截图
 │
-└── scripts/                            # 运维脚本
-    ├── init_db.py                      # 首次部署初始化（创建管理员 / 默认配置）
-    ├── restart.bat                     # Windows 后端重启（tskill + uvicorn）
-    └── backup.bat                      # 数据库 + 归档文件备份
+├── main.py                             # 项目入口（可能为临时/兼容脚本）
+├── tmp_gen.py                          # 临时生成脚本
+├── restart-services.bat                # 服务重启脚本
+├── bak.md                              # 备份文档
+└── .git/                               # Git 版本控制
 ```
 
-### 7.1 后端 4 层架构目录映射
+### 7.1 后端实际架构说明
+
+当前后端没有采用严格的 Repository / Infrastructure 物理分层，而是使用更扁平的结构：
 
 | 架构层 | 对应目录 | 职责说明 |
 |--------|---------|---------|
 | **Router** | `app/routers/` | HTTP 入口：参数校验、依赖注入、调用 Service、返回响应。禁止写业务逻辑。 |
-| **Service** | `app/services/` | 业务编排：状态机、算法、规则校验、事务编排。禁止直接操作 ORM。 |
-| **Repository** | `app/repositories/` | 数据访问：封装 SQLAlchemy 查询、分页、聚合、多表 Join。返回模型或 DTO。 |
-| **Infrastructure** | `app/infrastructure/` | 技术设施：数据库连接、文件系统、PDF 引擎、定时任务、消息发送。 |
+| **Service** | `app/services/` | 业务编排：状态机、算法、规则校验、事务编排。 |
+| **Model/ORM** | `app/models.py` | SQLAlchemy 模型定义与数据库映射。 |
+| **Schema/DTO** | `app/schemas.py` | Pydantic 请求校验、响应序列化。 |
+| **Core** | `app/core/` | 跨层共享：常量、依赖注入、异常、响应封装、安全。 |
+| **Database** | `app/database.py` | SQLAlchemy Engine、Session、连接池。 |
+| **Auth** | `app/auth.py` | 兼容层：登录、Token、密码相关路由/依赖。 |
+| **Utils** | `app/utils/` | 纯工具：审计日志、数据脱敏、PDF 生成、状态机。 |
 
 **分层调用规则**：
-- Router → Service → Repository → Infrastructure（**严禁逆向调用**）
-- Service 之间可横向调用（如 `notification_rule_engine` 在状态流转后触发）
+- Router → Service → Model/Schema（**严禁逆向调用**）
+- Service 之间可横向调用（如 `notification_service` 在状态流转后触发）
 - `utils/` 为纯函数，可被任意层调用
+- `database.py` 可被 Router/Service 按需注入
 
 ### 7.2 关键文件与章节对应表
 
 | 文件/目录 | 对应章节 | 说明 |
 |-----------|---------|------|
-| `app/core/scheduler.py` | 2.1.4 | APScheduler 初始化：截止提醒、逾期标记、自动归档 |
-| `app/infrastructure/scheduler_jobs.py` | 2.1.4 | 具体 Job 实现：与业务状态机联动 |
-| `app/services/workflow_state_machine.py` | 5.4 | 10 状态流转核心：自评→上级→协作→汇总→审批→发布→归档 |
-| `app/services/distribution_enforcer.py` | 5.5 | 强制分布执行：推荐 + 确认 + 小部门豁免 |
-| `app/utils/data_masking.py` | 6.6 | 手机 / 邮箱 / 身份证脱敏工具 |
-| `app/utils/audit_logger.py` | 6.7 | 操作日志写入 middleware + 异步持久化 |
 | `app/core/security.py` | 6.4 | JWT 编解码 + bcrypt 密码哈希 |
-| `frontend/src/composables/` | - | Vue 3 组合式函数：权限 / 表格 / 表单复用 |
-| `frontend/src/plugins/` | - | 第三方库按需注册：Element Plus / ECharts |
+| `app/core/exceptions.py` | 6.2 | 自定义异常：BizError / AuthError / ValidationError |
+| `app/core/response.py` | 6.3 | 统一响应封装：code / data / message |
+| `app/services/score_calculator.py` | 5.1 / 5.7 | 加权计算 + 仪表盘统计 |
+| `app/services/distribution_enforcer.py` | 5.3 / 5.5 | 强制分布执行：推荐 + 确认 + 小部门豁免 |
+| `app/services/workflow_state_machine.py` | 5.4 | 考核状态流转核心 |
+| `app/services/notification_service.py` | 5.13 | 通知规则引擎 / 站内信生成 |
+| `app/services/pdf_archive_generator.py` | 5.15 | PDF 归档 / 绩效档案生成 |
+| `app/utils/data_masking.py` | 6.6 | 手机 / 邮箱 / 身份证脱敏工具 |
+| `app/utils/audit_logger.py` | 6.7 | 操作日志写入 operation_logs 表 |
+| `app/routers/archive_guard.py` | 5.15 | 归档锁定 / 一致性校验 / 防篡改 |
+| `frontend/src/constants/scoringAnchors.js` | - | 评分锚点与等级阈值常量 |
+| `frontend/src/styles/variables.css` | - | 主题色 / 间距 CSS 变量 |
 
 ### 7.3 与实际已存在文件的映射
 
@@ -2814,14 +2780,25 @@ performance_evaluation_system/
 
 | 已有文件 | 目标目录 | 迁移动作 |
 |---------|---------|---------|
-| `backend/app/database.py` | `backend/app/infrastructure/database.py` | 迁移 + 修正 import |
-| `backend/app/dependencies.py` | `backend/app/core/dependencies.py` | 迁移（依赖注入属于核心层） |
-| `backend/app/auth.py` | `backend/app/core/security.py` | 合并迁移 |
+| `docs/PRD_绩效考核评分系统_v1.0.md` | `docs/PRD_绩效考核评分系统_v1.0.md` | 已迁移，与 TECH 同级 |
+| `docs/TECH_绩效考核评分系统_v1.0.md` | `docs/TECH_绩效考核评分系统_v1.0.md` | 已迁移，本文件所在位置 |
+| `docs/ACCEPTANCE_REPORT.md` | `docs/ACCEPTANCE_REPORT.md` | 已迁移 |
+| `docs/DEV_TODO_LIST.md` | `docs/DEV_TODO_LIST.md` | 已迁移 |
+| `docs/KNOWLEDGE_BASE.md` | `docs/KNOWLEDGE_BASE.md` | 已迁移 |
+| `backend/app/database.py` | 保持原位置 | 数据库连接不迁移到 infrastructure |
+| `backend/app/dependencies.py` | 保持原位置 | 依赖注入保留在 app 根目录 |
+| `backend/app/auth.py` | 保持原位置 | 认证路由保留在 app 根目录 |
+| `backend/app/core/dependencies.py` | 保持原位置 | 核心依赖注入层 |
+| `backend/app/core/security.py` | 保持原位置 | JWT 与密码安全 |
+| `backend/app/routers/archive_guard.py` | 保持原位置 | 归档保护路由 |
+| `backend/app/routers/health.py` | 保持原位置 | 健康检查路由 |
 | `backend/tests/` | 保持不变 | 已符合目录结构 |
 | `tests/scripts/` | 保持不变 | 历史脚本，可逐步迁移 |
 | `frontend/src/api/*.js` | 保持不变 | 已符合结构 |
-| `frontend/src/views/*/` | 保持不变 | 已符合结构（注意新增 `notifications/`） |
+| `frontend/src/views/*/` | 保持不变 | 已符合结构 |
 | `frontend/src/components/*.vue` | 保持不变 | 已符合结构 |
+| `frontend/src/constants/` | 保持不变 | 评分锚点等常量 |
+| `frontend/src/styles/` | 保持不变 | 全局样式与变量 |
 
 ---
 
