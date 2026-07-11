@@ -569,7 +569,7 @@ def list_cycle_employees(
 def cycle_progress(
     cycle_id: int,
     db: Session = Depends(get_db),
-    user = Depends(require_role("admin", "hr", "executive")),
+    user = Depends(get_current_user),
 ):
     cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
     if not cycle:

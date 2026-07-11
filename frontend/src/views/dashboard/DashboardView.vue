@@ -1,9 +1,5 @@
 <template>
   <div class="dashboard-container">
-    <!-- 高管仪表盘：独立组件，只读 -->
-    <ExecutiveDashboard v-if="userRole === 'executive'" />
-
-    <template v-else>
     <!-- 顶部：6阶段全流程图 -->
     <div class="dashboard-hero-card">
       <div class="hero-header">
@@ -29,7 +25,8 @@
               'active': isRoleStage(stage.key),
               'completed': isCompleted(stage.key),
               'current': isCurrent(stage.key),
-              'disabled': !isRoleStage(stage.key) && !isCompleted(stage.key)
+              'disabled': !isRoleStage(stage.key) && !isCompleted(stage.key),
+              'role-stage': isRoleStage(stage.key)
             }"
             @click="handleStageClick(stage)"
           >
@@ -42,8 +39,10 @@
             </div>
             <div class="stage-title">{{ stage.title }}</div>
             <div class="stage-desc">{{ stage.desc }}</div>
-            <div class="stage-status" v-if="isCurrent(stage.key)">
-              <span class="status-pill">进行中</span>
+            <div class="stage-status" v-if="isCurrent(stage.key) || (isRoleStage(stage.key) && !isCompleted(stage.key))">
+              <span class="status-pill" :class="{ 'role-pill': !isCurrent(stage.key) || isRoleStage(stage.key) }">
+                {{ isCurrent(stage.key) && isRoleStage(stage.key) ? '进行中 · 我的职责' : (isCurrent(stage.key) ? '进行中' : '我的职责') }}
+              </span>
             </div>
           </div>
 
@@ -187,7 +186,9 @@
         </el-table-column>
       </el-table>
     </div>
-    </template>
+
+    <!-- 高管专属图表 -->
+    <ExecutiveDashboard v-if="userRole === 'executive'" />
   </div>
 </template>
 
@@ -646,6 +647,17 @@ onMounted(async () => {
   background: var(--bg-card);
   border: 2px solid var(--border-light);
   box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+/* 角色职责顶部标识条 — 不受 completed/current 覆盖 */
+.stage-node.role-stage {
+  border-color: var(--primary-color) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2), var(--shadow-sm);
+}
+
+.stage-node.role-stage:hover {
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3), var(--shadow-lg);
 }
 
 .stage-node:hover {
@@ -766,6 +778,12 @@ onMounted(async () => {
   color: var(--accent-color);
   border: 1px solid rgba(245, 158, 11, 0.2);
   letter-spacing: 0.3px;
+}
+
+.status-pill.role-pill {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(99, 102, 241, 0.06) 100%);
+  color: var(--primary-color);
+  border: 1px solid rgba(99, 102, 241, 0.2);
 }
 
 /* Current Task Bar */
