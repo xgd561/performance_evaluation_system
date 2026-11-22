@@ -8,6 +8,8 @@ from app.models import (
     PeerReviewer, PeerReviewTask, AssessmentRecord, AssessmentCycle, Employee, Department, Position, User
 )
 
+from app.utils.json_columns import load_json
+
 router = APIRouter()
 
 
@@ -45,9 +47,9 @@ def get_my_peer_reviews(
         pos = db.query(Position).filter(Position.id == emp.position_id).first() if emp else None
         cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == rel.cycle_id).first()
 
-        self_scores = json.loads(record.self_scores) if record.self_scores else {}
-        manager_scores = json.loads(record.manager_scores) if record.manager_scores else {}
-        peer_scores = json.loads(record.peer_scores) if record.peer_scores else {}
+        self_scores = load_json(record.self_scores, {})
+        manager_scores = load_json(record.manager_scores, {})
+        peer_scores = load_json(record.peer_scores, {})
 
         result.append({
             "id": rel.id,

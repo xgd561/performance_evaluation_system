@@ -153,13 +153,13 @@ def create_appeal(
     db.refresh(appeal)
 
     # P6-05: 更新 AssessmentRecord 的 appeal_record JSON 字段
-    record.appeal_record = json.dumps({
+    record.appeal_record = {
         "appeal_id": appeal.id,
         "reason": reason,
         "detail": detail,
         "status": "pending",
         "created_at": appeal.created_at.isoformat() if appeal.created_at else None,
-    }, ensure_ascii=False)
+    }
     record.status = "appealed"
     db.commit()
 
@@ -247,12 +247,12 @@ def review_appeal(
     # 终审即结束申诉：考核记录从 appealed 回写为 published，避免记录滞留在申诉中
     if record and record.status == "appealed":
         record.status = "published"
-        record.appeal_record = json.dumps({
+        record.appeal_record = {
             "appeal_id": appeal.id,
             "action": action,
             "review_result": review_result,
             "resolved_at": resolved_at.isoformat(),
-        }, ensure_ascii=False)
+        }
 
     db.commit()
     db.refresh(appeal)
@@ -334,20 +334,20 @@ def resolve_appeal(
     record.status = "published"
     if resolution == "adjust":
         record.grade = new_grade
-        record.appeal_record = json.dumps({
+        record.appeal_record = {
             "appeal_id": appeal.id,
             "resolution": "adjust",
             "new_grade": new_grade,
             "comment": comment,
             "resolved_at": appeal.resolved_at.isoformat() if appeal.resolved_at else None,
-        }, ensure_ascii=False)
+        }
     else:
-        record.appeal_record = json.dumps({
+        record.appeal_record = {
             "appeal_id": appeal.id,
             "resolution": "maintain",
             "comment": comment,
             "resolved_at": appeal.resolved_at.isoformat() if appeal.resolved_at else None,
-        }, ensure_ascii=False)
+        }
 
     db.commit()
     db.refresh(appeal)

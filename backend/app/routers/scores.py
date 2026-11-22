@@ -18,6 +18,8 @@ from app.utils.workflow_state_machine import WorkflowStateMachine
 from app.routers.employees import _is_in_subordinate_chain, get_all_dept_ids
 from app.routers.archive_guard import check_record_not_archived, check_cycle_not_archived
 
+from app.utils.json_columns import load_json
+
 router = APIRouter()
 
 
@@ -32,7 +34,7 @@ def _ensure_score_details(db, record):
     details = db.query(ScoreDetail).filter(ScoreDetail.record_id == record.id).order_by(ScoreDetail.id).all()
     if details:
         return details
-    snapshot = json.loads(record.kpi_snapshot) if record.kpi_snapshot else []
+    snapshot = load_json(record.kpi_snapshot, [])
     if isinstance(snapshot, dict):
         items = snapshot.get("items", [])
     elif isinstance(snapshot, list):
@@ -134,9 +136,9 @@ def get_score_summary(
         dept = db.query(Department).filter(Department.id == r.department_id).first()
         pos = db.query(Position).filter(Position.id == r.position_id).first()
 
-        self_scores = json.loads(r.self_scores) if r.self_scores else {}
-        manager_scores = json.loads(r.manager_scores) if r.manager_scores else {}
-        peer_scores = json.loads(r.peer_scores) if r.peer_scores else {}
+        self_scores = load_json(r.self_scores, {})
+        manager_scores = load_json(r.manager_scores, {})
+        peer_scores = load_json(r.peer_scores, {})
 
         result.append({
             "record_id": r.id,
@@ -174,9 +176,9 @@ def calculate_scores(
 
     check_cycle_not_archived(cycle_id, db)
 
-    dim_weights = json.loads(cycle.dimension_weights)
-    reviewer_weights = json.loads(cycle.reviewer_weights)
-    grade_rules = json.loads(cycle.grade_rules)
+    dim_weights = load_json(cycle.dimension_weights, {})
+    reviewer_weights = load_json(cycle.reviewer_weights, {})
+    grade_rules = load_json(cycle.grade_rules, {})
 
     # 1. Weight validation
     dim_sum = sum(dim_weights.values()) if isinstance(dim_weights, dict) else 0.0
@@ -235,18 +237,18 @@ def calculate_scores(
         return "D"
 
     for r in records:
-        self_scores = json.loads(r.self_scores) if r.self_scores else {}
-        manager_scores = json.loads(r.manager_scores) if r.manager_scores else {}
-        peer_scores = json.loads(r.peer_scores) if r.peer_scores else {}
+        self_scores = load_json(r.self_scores, {})
+        manager_scores = load_json(r.manager_scores, {})
+        peer_scores = load_json(r.peer_scores, {})
 
         # 如有 KPI 评分，按权重加权计算 performance 维度
         self_kpi_perf = _get_kpi_weighted_performance(db, r.id, "self")
         manager_kpi_perf = _get_kpi_weighted_performance(db, r.id, "manager")
 
         result = calculate_weighted_score(
-            self_scores=json.loads(r.self_scores) if r.self_scores else {},
-            manager_scores=json.loads(r.manager_scores) if r.manager_scores else {},
-            peer_scores=json.loads(r.peer_scores) if r.peer_scores else {},
+            self_scores=load_json(r.self_scores, {}),
+            manager_scores=load_json(r.manager_scores, {}),
+            peer_scores=load_json(r.peer_scores, {}),
             dim_weights=dim_weights,
             reviewer_weights=reviewer_weights,
             kpi_weighted_self_performance=self_kpi_perf,
@@ -271,15 +273,17 @@ def calculate_scores(
     all_adjustment_logs = []
     all_override_candidates = []
 
-    for dept_id, dept_recs in dept_records.items():
-        result = enforce_distribution(
-            dept_recs,
-            grade_rules,
-            len(dept_recs),
-            small_dept_exemption=cycle.small_dept_exemption,
-        )
-        all_adjustment_logs.extend(result["adjustment_log"])
-        all_override_candidates.extend(result["override_candidates"])
+    # 强制分布受周期开关控制：关闭时只算分不分级，不做任何降级/特批标记
+    if cycle.is_distribution_enabled:
+        for dept_id, dept_recs in dept_records.items():
+            result = enforce_distribution(
+                dept_recs,
+                grade_rules,
+                len(dept_recs),
+                small_dept_exemption=cycle.small_dept_exemption,
+            )
+            all_adjustment_logs.extend(result["adjustment_log"])
+            all_override_candidates.extend(result["override_candidates"])
 
     db.commit()
 
@@ -325,6 +329,9 @@ def calculate_scores(
     return {
         "calculated": len(records),
         "abnormal_count": abnormal_count,
+        "adjustment_count": len(all_adjustment_logs),
+        "override_candidate_count": len(all_override_candidates),
+        "distribution_enabled": bool(cycle.is_distribution_enabled),
         "pending_distribution_review_count": pending_distribution_review_count,
         "pending_approval_count": pending_approval_count,
         "status": "completed",
@@ -396,8 +403,8 @@ def get_to_review_list(
         pos = db.query(Position).filter(Position.id == r.position_id).first()
         cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == r.cycle_id).first()
 
-        self_scores = json.loads(r.self_scores) if r.self_scores else {}
-        kpi_snapshot = json.loads(r.kpi_snapshot) if r.kpi_snapshot else {}
+        self_scores = load_json(r.self_scores, {})
+        kpi_snapshot = load_json(r.kpi_snapshot, {})
 
         result.append({
             "record_id": r.id,
@@ -477,7 +484,7 @@ def submit_manager_score(
         _update_kpi_scores(db, record_id, body.kpi_scores, "manager")
 
     # 校验与自评分差异超过20分的维度
-    self_scores = json.loads(record.self_scores) if record.self_scores else {}
+    self_scores = load_json(record.self_scores, {})
     alerts = []
     for dim in ["performance", "ability", "attitude"]:
         m_score = manager_scores.get(dim)
@@ -486,7 +493,7 @@ def submit_manager_score(
             alerts.append(f"维度[{dim}]上级评分与自评分差异过大: {m_score} vs {s_score}")
 
     old_status = record.status
-    record.manager_scores = json.dumps(manager_scores)
+    record.manager_scores = manager_scores
     record.manager_comment = body.comment
     record.manager_submitted = True
 
@@ -590,10 +597,10 @@ def submit_peer_score(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="能力分数需在0-100之间")
 
     # 协作人只评"工作能力"维度
-    peer_scores = json.loads(record.peer_scores) if record.peer_scores else {}
+    peer_scores = load_json(record.peer_scores, {})
     peer_scores["ability"] = body.ability
 
-    record.peer_scores = json.dumps(peer_scores)
+    record.peer_scores = peer_scores
     peer_relation.status = "completed"
 
     # 同时更新 PeerReviewTask（如有），保证 calculate_scores 能检测到已完成
@@ -651,7 +658,7 @@ def get_my_assessment(
     for r in records:
         cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == r.cycle_id).first()
         is_published = r.status in ["published", "archived"]
-        self_scores = json.loads(r.self_scores) if r.self_scores else {}
+        self_scores = load_json(r.self_scores, {})
         if user.role == "employee" and not is_published:
             manager_scores = {}
             peer_scores = {}
@@ -668,8 +675,8 @@ def get_my_assessment(
             appeal = None
             published_at = None
         else:
-            manager_scores = json.loads(r.manager_scores) if r.manager_scores else {}
-            peer_scores = json.loads(r.peer_scores) if r.peer_scores else {}
+            manager_scores = load_json(r.manager_scores, {})
+            peer_scores = load_json(r.peer_scores, {})
             weighted_performance = str(r.weighted_performance) if r.weighted_performance else None
             weighted_ability = str(r.weighted_ability) if r.weighted_ability else None
             weighted_attitude = str(r.weighted_attitude) if r.weighted_attitude else None
@@ -755,8 +762,8 @@ def submit_self_score(
     if record.employee_id != user.employee_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作此考核记录")
 
-    # 状态校验：只能待自评时提交
-    if record.status not in ["pending_self", "not_started"]:
+    # 状态校验：待自评可直接提交；周期尚未启动（not_started）时允许首次自评，提交前自动启动周期
+    if record.status not in ("pending_self", "not_started"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="当前状态不允许提交自评")
 
     # 分数校验
@@ -775,10 +782,21 @@ def submit_self_score(
         _update_kpi_scores(db, record_id, body.kpi_scores, "self")
 
     old_status = record.status
-    record.self_scores = json.dumps(self_scores)
+    record.self_scores = self_scores
+    # not_started 状态下状态机只允许 start_cycle，先自动启动周期完成 not_started -> pending_self
+    current_state = old_status
+    if current_state == "not_started":
+        current_state = WorkflowStateMachine.transition(
+            current_state=current_state,
+            action="start_cycle",
+            db=db,
+            user_id=user.id,
+            target_id=record_id,
+            target_type="assessment_record",
+        )
     # 使用状态机执行转换: pending_self -> submit_self -> pending_manager
     record.status = WorkflowStateMachine.transition(
-        current_state=old_status,
+        current_state=current_state,
         action="submit_self",
         db=db,
         user_id=user.id,
@@ -823,7 +841,7 @@ def get_manager_draft(
     if record.employee_id not in [e.id for e in current_employee.subordinates]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权为此员工评分")
 
-    draft = json.loads(record.manager_draft_scores) if record.manager_draft_scores else None
+    draft = load_json(record.manager_draft_scores, None)
     return {
         "record_id": record_id,
         "draft": draft,
@@ -854,7 +872,7 @@ def save_manager_draft(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权为此员工评分")
 
     draft_data = body.model_dump(exclude_unset=True)
-    record.manager_draft_scores = json.dumps(draft_data, ensure_ascii=False)
+    record.manager_draft_scores = draft_data
     db.commit()
     db.refresh(record)
 
@@ -956,7 +974,7 @@ def save_score_draft(
     column_name = _get_draft_column(draft_type)
 
     draft_data = body.model_dump(exclude_unset=True)
-    setattr(record, column_name, json.dumps(draft_data, ensure_ascii=False))
+    setattr(record, column_name, draft_data)
     db.commit()
     db.refresh(record)
 
@@ -1051,9 +1069,9 @@ def get_assessment_record_detail(
     dept = db.query(Department).filter(Department.id == record.department_id).first()
     pos = db.query(Position).filter(Position.id == record.position_id).first()
 
-    self_scores = json.loads(record.self_scores) if record.self_scores else {}
-    manager_scores = json.loads(record.manager_scores) if record.manager_scores else {}
-    peer_scores = json.loads(record.peer_scores) if record.peer_scores else {}
+    self_scores = load_json(record.self_scores, {})
+    manager_scores = load_json(record.manager_scores, {})
+    peer_scores = load_json(record.peer_scores, {})
 
     # KPI 评分明细
     score_details = db.query(ScoreDetail).filter(ScoreDetail.record_id == record_id).order_by(ScoreDetail.id).all()
@@ -1146,13 +1164,13 @@ def get_self_assessment_data(
     dept = db.query(Department).filter(Department.id == record.department_id).first()
     pos = db.query(Position).filter(Position.id == record.position_id).first()
 
-    kpi_snapshot = json.loads(record.kpi_snapshot) if record.kpi_snapshot else []
+    kpi_snapshot = load_json(record.kpi_snapshot, [])
     if isinstance(kpi_snapshot, dict):
         kpi_items = kpi_snapshot.get("items", [])
     else:
         kpi_items = kpi_snapshot
 
-    self_scores = json.loads(record.self_scores) if record.self_scores else {}
+    self_scores = load_json(record.self_scores, {})
 
     # 从 score_drafts 表读取 self 草稿
     from app.models import ScoreDraft
@@ -1191,8 +1209,8 @@ def get_self_assessment_data(
         "self_scores": self_scores,
         "draft": draft_data,
         "has_draft": draft_data is not None,
-        "dimension_weights": json.loads(cycle.dimension_weights) if cycle and cycle.dimension_weights else None,
-        "reviewer_weights": json.loads(cycle.reviewer_weights) if cycle and cycle.reviewer_weights else None,
+        "dimension_weights": load_json(cycle.dimension_weights, {}) if cycle and cycle.dimension_weights else None,
+        "reviewer_weights": load_json(cycle.reviewer_weights, {}) if cycle and cycle.reviewer_weights else None,
     }
 
 
@@ -1240,9 +1258,9 @@ def get_peer_review_list(
             "submitted_at": task.submitted_at.isoformat() if task.submitted_at else None,
             "peer_due_date": str(cycle.peer_due_date) if cycle and cycle.peer_due_date else None,
             "created_at": task.created_at.isoformat() if task.created_at else None,
-            "self_scores": json.loads(record.self_scores) if record.self_scores else {},
-            "manager_scores": json.loads(record.manager_scores) if record.manager_scores else {},
-            "peer_scores": json.loads(record.peer_scores) if record.peer_scores else {},
+            "self_scores": load_json(record.self_scores, {}),
+            "manager_scores": load_json(record.manager_scores, {}),
+            "peer_scores": load_json(record.peer_scores, {}),
         })
 
     return {"items": result, "total": len(result)}
@@ -1300,7 +1318,7 @@ def submit_peer_review_task(
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == task.record_id).first()
     emp = db.query(Employee).filter(Employee.id == record.employee_id).first() if record else None
     if record:
-        peer_scores = json.loads(record.peer_scores) if record.peer_scores else {}
+        peer_scores = load_json(record.peer_scores, {})
         # 如果有多位协作人，取平均值
         all_peer_tasks = db.query(PeerReviewTask).filter(
             PeerReviewTask.record_id == record.id,
@@ -1309,7 +1327,7 @@ def submit_peer_review_task(
         completed_scores = [float(t.ability_score) for t in all_peer_tasks if t.ability_score is not None]
         if completed_scores:
             peer_scores["ability"] = round(sum(completed_scores) / len(completed_scores), 1)
-        record.peer_scores = json.dumps(peer_scores)
+        record.peer_scores = peer_scores
         db.commit()
         db.refresh(record)
 

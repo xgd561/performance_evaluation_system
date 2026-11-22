@@ -14,6 +14,9 @@ from sqlalchemy.orm import Session
 
 from app.models import AssessmentRecord, Employee, Department, Position, AssessmentCycle
 
+# 归档目录固定在 backend/uploads，避免随进程 CWD 漂移导致文件散落
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
+
 
 def _ensure_fonts():
     """尝试注册中文字体，用于 PDF 中显示中文"""
@@ -63,7 +66,7 @@ def generate_archive_pdf(record_id: int, db: Session, output_dir: Optional[str] 
 
     # 准备输出目录
     if output_dir is None:
-        output_dir = os.path.join("uploads", "archives", str(record.cycle_id))
+        output_dir = os.path.join(UPLOAD_DIR, "archives", str(record.cycle_id))
     os.makedirs(output_dir, exist_ok=True)
 
     filename = f"{emp.employee_no if emp else 'unknown'}_archive.pdf"

@@ -18,6 +18,53 @@ def _normalize_level(value):
         raise ValueError(f"职级格式不合法：{value}，应为 P1-P99 或 M1-M99")
     return text
 
+# ------------------ 权重键判别 ------------------
+# 历史接口只有 weights 一个字段，导致「评分人权重」与「维度权重」混用一个位置。
+# 这里按键名判别语义：self/manager/peer 为评分人，performance/ability/attitude 为维度。
+REVIEWER_WEIGHT_KEYS = frozenset({"self", "manager", "peer"})
+DIMENSION_WEIGHT_KEYS = frozenset({"performance", "ability", "attitude"})
+
+
+def classify_weight_keys(mapping: Dict[str, Any]) -> str:
+    """按键名判别权重语义，返回 "reviewer" 或 "dimension"；无法判别时报错。"""
+    keys = set(mapping)
+    if keys <= REVIEWER_WEIGHT_KEYS:
+        return "reviewer"
+    if keys <= DIMENSION_WEIGHT_KEYS:
+        return "dimension"
+    raise ValueError(
+        "权重键无法识别（" + ", ".join(sorted(keys)) + "）：评分人权重用 self/manager/peer，"
+        "维度权重用 performance/ability/attitude，两类不可混传"
+    )
+
+
+def validate_weight_mapping(mapping: Dict[str, Any], field_name: str, require_dimension_keys: bool = False):
+    """校验权重字典：支持扁平 {self/manager/peer}、{维度: 百分比} 与按维度嵌套的评分人权重。"""
+    if not isinstance(mapping, dict) or not mapping:
+        raise ValueError(f"{field_name} 必须是非空对象")
+
+    if any(isinstance(v, dict) for v in mapping.values()):
+        # 嵌套形式：{performance: {self, manager, peer}, ability: {...}}
+        if not set(mapping) <= DIMENSION_WEIGHT_KEYS:
+            raise ValueError(f"{field_name} 嵌套形式的外层键必须是 performance/ability/attitude")
+        for dim, inner in mapping.items():
+            if not isinstance(inner, dict):
+                raise ValueError(f"{field_name}.{dim} 必须是对象")
+            if not set(inner) <= REVIEWER_WEIGHT_KEYS:
+                raise ValueError(f"{field_name}.{dim} 的键必须是 self/manager/peer")
+            total = sum(inner.values())
+            if total != 100:
+                raise ValueError(f"{field_name}.{dim} 权重总和必须等于100，当前为{total}")
+        return mapping
+
+    kind = classify_weight_keys(mapping)
+    if require_dimension_keys and kind != "dimension":
+        raise ValueError(f"{field_name} 必须是维度权重（performance/ability/attitude）")
+    total = sum(mapping.values())
+    if total != 100:
+        raise ValueError(f"{field_name} 权重总和必须等于100，当前为{total}")
+    return mapping
+
 # ------------------ Common ------------------
 class StandardResponse(BaseModel):
     code: int = 200
@@ -257,20 +304,23 @@ class AssessmentCycleCreate(BaseModel):
     peer_due_date: Optional[date] = None
     peer_review_enabled: Optional[bool] = True
     department_ids: Optional[List[int]] = None
-    # 评分人权重（self/manager/peer 或按维度嵌套）；不传则由 config_service 全局默认值填充
-    weights: Optional[Dict[str, int]] = None
+    # 兼容历史入参：键为 self/manager/peer → 评分人权重；为 performance/ability/attitude → 维度权重；
+    # 不传则由 config_service 全局默认值填充
+    weights: Optional[Dict[str, Any]] = None
+    # 显式指定维度权重（与 weights 互斥，优先级高于 weights 中的维度判别结果）
+    dimension_weights: Optional[Dict[str, int]] = None
     grade_rules: Dict[str, Any]
     small_dept_exemption: Optional[bool] = True
 
-    @field_validator('weights')
-    @classmethod
-    def check_weights_sum(cls, v):
-        if v is None:
-            return v
-        total = sum(v.values())
-        if total != 100:
-            raise ValueError(f"权重总和必须等于100，当前为{total}%")
-        return v
+    @model_validator(mode='after')
+    def check_weights(self):
+        if self.weights is not None and self.dimension_weights is not None:
+            raise ValueError("weights 与 dimension_weights 不可同时传入")
+        if self.weights is not None:
+            validate_weight_mapping(self.weights, "weights")
+        if self.dimension_weights is not None:
+            validate_weight_mapping(self.dimension_weights, "dimension_weights", require_dimension_keys=True)
+        return self
 
     @field_validator('end_date')
     @classmethod
@@ -333,10 +383,21 @@ class AssessmentCycleUpdate(BaseModel):
     self_due_date: Optional[date] = None
     manager_due_date: Optional[date] = None
     peer_due_date: Optional[date] = None
-    weights: Optional[Dict[str, int]] = None
+    weights: Optional[Dict[str, Any]] = None
+    dimension_weights: Optional[Dict[str, int]] = None
     grade_rules: Optional[Dict[str, Any]] = None
     small_dept_exemption: Optional[bool] = None
     peer_review_enabled: Optional[bool] = None
+
+    @model_validator(mode='after')
+    def check_weights(self):
+        if self.weights is not None and self.dimension_weights is not None:
+            raise ValueError("weights 与 dimension_weights 不可同时传入")
+        if self.weights is not None:
+            validate_weight_mapping(self.weights, "weights")
+        if self.dimension_weights is not None:
+            validate_weight_mapping(self.dimension_weights, "dimension_weights", require_dimension_keys=True)
+        return self
 
 class AssessmentCycleOut(BaseModel):
     id: int

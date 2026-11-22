@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 import json
+import logging
 from pydantic import BaseModel
 
 from app.database import get_db
@@ -17,6 +18,8 @@ from app.utils.workflow_state_machine import WorkflowStateMachine
 from app.routers.archive_guard import check_record_not_archived
 from app.services.notification_service import create_notification
 from app.core.exceptions import BizError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 record_router = APIRouter()
@@ -441,11 +444,11 @@ def submit_interview(
                 type="performance",
             )
         except Exception:
-            # 通知发送失败不阻断主流程
-            pass
+            # 通知发送失败不阻断主流程，但保留告警日志便于排查
+            logger.warning("面谈结果发布通知发送失败：record_id=%s", record.id, exc_info=True)
     else:
-        # 如果找不到用户则写 TODO 注释（这里用 pass 表示）
-        pass
+        # 员工尚未开通登录账号，无法投递站内信；记录告警供 HR 补建账号
+        logger.warning("员工未绑定系统账号，跳过面谈结果通知：employee_id=%s", employee.id)
 
     db.commit()
     db.refresh(record)

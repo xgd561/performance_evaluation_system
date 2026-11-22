@@ -8,6 +8,7 @@ from app.models import (
     AssessmentRecord, AssessmentCycle, Employee, Department, Position, User, PeerReviewer, ScoreDetail
 )
 from app.auth import get_password_hash
+from app.utils.json_columns import load_json
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +156,7 @@ class TestSelfAssessment:
         # Verify DB state
         db_session.refresh(record)
         assert record.status == "pending_manager"
-        assert json.loads(record.self_scores) == payload
+        assert load_json(record.self_scores, {}) == payload
 
     def test_get_my_assessment(self, client: TestClient, employee_token, employee_user, db_session: Session):
         cycle = _create_cycle(db_session)
@@ -259,7 +260,7 @@ class TestManagerScore:
 
         db_session.refresh(record)
         assert record.status == "pending_peer"
-        assert json.loads(record.manager_scores) == {"performance": 85, "ability": 88, "attitude": 86}
+        assert load_json(record.manager_scores, {}) == {"performance": 85, "ability": 88, "attitude": 86}
 
     def test_get_to_review_list(self, client: TestClient, manager_token, manager_user, subordinate_user, db_session: Session):
         cycle = _create_cycle(db_session)

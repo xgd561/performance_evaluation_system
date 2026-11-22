@@ -10,6 +10,7 @@ from app.models import (
     PeerReviewer, PeerReviewTask, Notification
 )
 from app.database import SessionLocal
+from app.utils.json_columns import load_json
 
 client = TestClient(app)
 
@@ -353,7 +354,7 @@ def test_submit_peer_review_peer_scores_avg(peer_token, peer_review_task, db: Se
         assert resp.status_code == 200
 
         db.refresh(rec)
-        peer_scores = json.loads(rec.peer_scores) if rec.peer_scores else {}
+        peer_scores = load_json(rec.peer_scores, {})
         # 平均值 (88 + 92) / 2 = 90
         assert peer_scores.get("ability") == 90
 

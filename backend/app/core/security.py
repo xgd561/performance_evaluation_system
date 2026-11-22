@@ -1,25 +1,31 @@
-import bcrypt
-from datetime import datetime, timedelta
+"""鉴权兼容层。
+
+生产代码统一使用 app.auth 的鉴权实现；本模块保留历史函数签名，
+密钥/算法/密码哈希/token 解码均委托 app.auth，避免两套实现分叉。
+"""
 from typing import Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
+from app.auth import (
+    ALGORITHM,
+    SECRET_KEY,
+    create_access_token as _auth_create_access_token,
+    decode_token as _auth_decode_token,
+    get_password_hash as _auth_get_password_hash,
+    verify_password as _auth_verify_password,
+)
 from app.database import get_db
 from app.models import User
-
-SECRET_KEY = "your-secret-key-change-in-production"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_HOURS = 2
 
 security = HTTPBearer(auto_error=False)
 
 
 def create_access_token(user_id: int, role: str) -> str:
     """
-    创建 JWT access token，默认 2 小时过期
+    创建 JWT access token（历史签名：按 user_id + role 编码）
 
     Args:
         user_id: 用户 ID
@@ -28,9 +34,7 @@ def create_access_token(user_id: int, role: str) -> str:
     Returns:
         str: 编码后的 JWT 字符串
     """
-    expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
-    to_encode = {"sub": str(user_id), "role": role, "exp": expire}
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return _auth_create_access_token({"sub": str(user_id), "role": role})
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -44,9 +48,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         bool: 是否匹配
     """
-    return bcrypt.checkpw(
-        plain_password.encode("utf-8"), hashed_password.encode("utf-8")
-    )
+    return _auth_verify_password(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
@@ -59,7 +61,7 @@ def get_password_hash(password: str) -> str:
     Returns:
         str: 哈希后的密码字符串
     """
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return _auth_get_password_hash(password)
 
 
 def decode_token(token: str) -> Optional[dict]:
@@ -72,11 +74,7 @@ def decode_token(token: str) -> Optional[dict]:
     Returns:
         Optional[dict]: 解码后的 payload，验证失败返回 None
     """
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except JWTError:
-        return None
+    return _auth_decode_token(token)
 
 
 def get_current_user(

@@ -96,6 +96,8 @@ def _can_access_approval_detail(user, record: AssessmentRecord, db: Session):
     return False
 
 
+from app.utils.json_columns import load_json
+
 router = APIRouter()
 
 
@@ -261,8 +263,8 @@ def get_pending_approvals(
         pos = db.query(Position).filter(Position.id == r.position_id).first()
         cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == r.cycle_id).first()
 
-        self_scores = json.loads(r.self_scores) if r.self_scores else {}
-        manager_scores = json.loads(r.manager_scores) if r.manager_scores else {}
+        self_scores = load_json(r.self_scores, {})
+        manager_scores = load_json(r.manager_scores, {})
         total_score = str(r.total_score) if r.total_score else None
         grade = r.grade if r.grade else None
 
@@ -362,9 +364,9 @@ def get_approval_detail(
     pos = db.query(Position).filter(Position.id == record.position_id).first()
     cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == record.cycle_id).first()
 
-    self_scores = json.loads(record.self_scores) if record.self_scores else {}
-    manager_scores = json.loads(record.manager_scores) if record.manager_scores else {}
-    peer_scores = json.loads(record.peer_scores) if record.peer_scores else {}
+    self_scores = load_json(record.self_scores, {})
+    manager_scores = load_json(record.manager_scores, {})
+    peer_scores = load_json(record.peer_scores, {})
 
     # Peer comments from PeerReviewTask
     peer_tasks = db.query(PeerReviewTask).filter(
@@ -846,3 +848,74 @@ def reject_distribution_override(
     )
 
     return {"message": "特批申请已驳回", "record_id": record_id}
+
+
+@router.get("/department-distribution")
+def get_department_distribution(
+    department_id: int = Query(..., description="部门 ID"),
+    cycle_id: Optional[int] = Query(None, description="考核周期 ID，缺省取该部门最近一个周期"),
+    db: Session = Depends(get_db),
+    user = Depends(require_role("admin", "hr", "manager", "executive")),
+):
+    """部门当前等级分布（审批工作台底部卡片使用）。
+
+    返回 {grades: [{grade, count, ratio, is_over_limit}], total, cycle_id}，
+    is_over_limit 按周期 grade_rules 的 ratio_limit（缺省 A20/B70/C10）与小部门豁免规则判定。
+    """
+    from collections import Counter
+    from app.services.distribution_enforcer import _normalize_grade_rules, _small_dept_caps
+
+    if cycle_id is None:
+        latest = (
+            db.query(AssessmentRecord.cycle_id)
+            .filter(AssessmentRecord.department_id == department_id)
+            .order_by(AssessmentRecord.cycle_id.desc())
+            .first()
+        )
+        if not latest:
+            return {"grades": [], "total": 0, "cycle_id": None}
+        cycle_id = latest[0]
+
+    records = (
+        db.query(AssessmentRecord)
+        .filter(
+            AssessmentRecord.department_id == department_id,
+            AssessmentRecord.cycle_id == cycle_id,
+        )
+        .all()
+    )
+    total = len(records)
+    if total == 0:
+        return {"grades": [], "total": 0, "cycle_id": cycle_id}
+
+    cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
+    rules = _normalize_grade_rules(load_json(cycle.grade_rules, {}) if cycle else {})
+
+    if cycle and cycle.small_dept_exemption and total <= 5:
+        caps = _small_dept_caps(total)
+    else:
+        caps = {}
+        for grade, rule in rules.items():
+            ratio_limit = rule.get("ratio_limit")
+            caps[grade] = int(total * ratio_limit) if ratio_limit is not None else total
+
+    counts = Counter(r.grade for r in records if r.grade)
+    ordered_grades = list(rules.keys()) + [g for g in counts if g not in rules]
+
+    grades = []
+    for grade in ordered_grades:
+        count = counts.get(grade, 0)
+        grades.append({
+            "grade": grade,
+            "count": count,
+            "ratio": round(count * 100.0 / total, 1),
+            "is_over_limit": count > caps.get(grade, total),
+        })
+
+    return {
+        "grades": grades,
+        "total": total,
+        "cycle_id": cycle_id,
+        "cycle_name": cycle.name if cycle else None,
+        "is_distribution_enabled": bool(cycle.is_distribution_enabled) if cycle else False,
+    }

@@ -277,3 +277,76 @@ class TestDistributionEnforcer:
         db_session.refresh(record)
         assert record.is_distribution_override is True
         assert record.grade == "A"
+
+
+class TestDepartmentDistributionApi:
+    """审批工作台底部「部门当前等级分布」接口。"""
+
+    def test_department_distribution_returns_grades(
+        self, client: TestClient, admin_user, admin_token, db_session: Session
+    ):
+        dept = Department(name="分布测试部", code="DIST")
+        db_session.add(dept)
+        db_session.flush()
+
+        cycle = AssessmentCycle(
+            name="分布统计周期", type="季度",
+            start_date=date(2026, 1, 1), end_date=date(2026, 3, 31),
+            status="pending_approval",
+            # 数值简写：ratio_limit 应由 A20/B70/C10 默认值补全
+            grade_rules={"A": 90, "B": 80, "C": 60, "D": 0},
+            small_dept_exemption=False,
+        )
+        db_session.add(cycle)
+        db_session.flush()
+
+        grades = ["A", "A", "A"] + ["B"] * 6 + ["C"]
+        for i, grade in enumerate(grades):
+            emp = Employee(employee_no=f"DIST{i:03d}", name=f"分布员工{i}", department_id=dept.id)
+            db_session.add(emp)
+            db_session.flush()
+            db_session.add(
+                AssessmentRecord(
+                    cycle_id=cycle.id,
+                    employee_id=emp.id,
+                    department_id=dept.id,
+                    status="pending_approval",
+                    grade=grade,
+                    original_grade=grade,
+                    total_score=95 - i,
+                )
+            )
+        db_session.commit()
+
+        resp = client.get(
+            f"/api/v1/approvals/department-distribution?department_id={dept.id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 200, resp.text
+
+        data = resp.json()
+        assert data["cycle_id"] == cycle.id
+        assert data["total"] == 10
+
+        by_grade = {item["grade"]: item for item in data["grades"]}
+        assert by_grade["A"]["count"] == 3
+        assert by_grade["A"]["ratio"] == 30.0
+        # A 上限 int(10 * 0.2) = 2，实际 3 人 → 超限
+        assert by_grade["A"]["is_over_limit"] is True
+        assert by_grade["B"]["is_over_limit"] is False
+
+    def test_department_distribution_empty_when_no_records(
+        self, client: TestClient, admin_user, admin_token, db_session: Session
+    ):
+        dept = Department(name="空部门分布", code="DIST_EMPTY")
+        db_session.add(dept)
+        db_session.commit()
+
+        resp = client.get(
+            f"/api/v1/approvals/department-distribution?department_id={dept.id}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["grades"] == []
+        assert data["total"] == 0

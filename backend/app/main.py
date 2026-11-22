@@ -93,6 +93,8 @@ direct_api.include_router(reports.router, prefix="/reports", tags=["报表分析
 direct_api.include_router(peers.router, prefix="/peer-reviewers", tags=["协作评分"])
 direct_api.include_router(logs.router, prefix="/logs", tags=["操作日志"])
 direct_api.include_router(notifications.router, prefix="/notifications", tags=["通知消息"])
+# 无前缀同样暴露 /health，便于运维探活在任意挂载方式下可用
+direct_api.include_router(health.router, tags=["健康检查"])
 
 app.include_router(direct_api)
 

@@ -447,7 +447,6 @@ async function submitForm() {
       // 评分人权重交由后端取 config_service 全局默认值，前端不再硬编码
       grade_rules: { A: 90, B: 80, C: 60, D: 0 },
     }
-    console.log('[DEBUG] submitForm payload:', payload)
     if (isEdit.value) {
       await updateCycle(form.id, payload)
       ElMessage.success('更新成功')

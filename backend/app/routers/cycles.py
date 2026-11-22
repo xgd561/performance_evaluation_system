@@ -19,6 +19,7 @@ from app.schemas import (
     AddEmployeesToCycleRequest,
     StandardResponse,
     CycleEmployeeOut,
+    classify_weight_keys,
 )
 
 from app.services.operation_logger import log_operation
@@ -27,21 +28,12 @@ from app.services import config_service
 from app.utils.workflow_state_machine import WorkflowStateMachine
 from app.utils.pdf_generator import generate_performance_pdf
 from app.services.pdf_archive_generator import generate_archive_pdf
-from app.utils.pdf_generator import generate_performance_pdf
-from app.utils.pdf_generator import generate_performance_pdf
-from app.utils.pdf_generator import generate_performance_pdf
-from app.utils.pdf_generator import generate_performance_pdf
+from app.utils.json_columns import load_json
 
 
 def _parse_json_field(value):
-    """安全解析 JSON 字段：兼容字符串和已反序列化的 dict/list"""
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        return json.loads(value)
-    return value
+    """安全解析 JSON 字段：兼容 JSON 字符串、已反序列化的 dict/list 与空值。"""
+    return load_json(value, {})
 
 
 router = APIRouter()
@@ -189,8 +181,14 @@ def create_cycle(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="考核周期名称已存在")
 
     # 维度/评分人权重统一取全局配置默认值，避免本处硬编码与 config_service 口径分叉
-    dimension_weights = config_service.get_dimension_weights(db)
-    reviewer_weights = req.weights or config_service.get_reviewer_weights(db)
+    dimension_weights = req.dimension_weights or config_service.get_dimension_weights(db)
+    reviewer_weights = config_service.get_reviewer_weights(db)
+    if req.weights is not None:
+        # 历史单字段入参按键名判别：维度键落 dimension_weights，评分人键落 reviewer_weights
+        if classify_weight_keys(req.weights) == "dimension":
+            dimension_weights = req.weights
+        else:
+            reviewer_weights = req.weights
 
     cycle = AssessmentCycle(
         name=req.name,
@@ -201,9 +199,9 @@ def create_cycle(
         manager_due_date=req.manager_due_date,
         peer_due_date=req.peer_due_date,
         status="not_started",
-        dimension_weights=json.dumps(dimension_weights),
-        reviewer_weights=json.dumps(reviewer_weights),
-        grade_rules=json.dumps(normalized_grade_rules),
+        dimension_weights=dimension_weights,
+        reviewer_weights=reviewer_weights,
+        grade_rules=normalized_grade_rules,
         small_dept_exemption=req.small_dept_exemption if req.small_dept_exemption is not None else True,
         peer_review_enabled=req.peer_review_enabled if req.peer_review_enabled is not None else True,
     )
@@ -243,9 +241,15 @@ def update_cycle(
 
     for field, value in req.model_dump(exclude_unset=True).items():
         if field == "weights":
-            setattr(cycle, "reviewer_weights", json.dumps(value))
+            # 按键名判别：维度键写 dimension_weights，评分人键写 reviewer_weights
+            if classify_weight_keys(value) == "dimension":
+                setattr(cycle, "dimension_weights", value)
+            else:
+                setattr(cycle, "reviewer_weights", value)
+        elif field == "dimension_weights":
+            setattr(cycle, "dimension_weights", value)
         elif field == "grade_rules":
-            setattr(cycle, "grade_rules", json.dumps(value))
+            setattr(cycle, "grade_rules", value)
         elif field == "small_dept_exemption":
             setattr(cycle, "small_dept_exemption", value)
         elif field == "peer_review_enabled":
@@ -354,7 +358,7 @@ def launch_cycle(
                 position_id=emp.position_id,
                 department_id=emp.department_id,
                 status="pending_self",
-                kpi_snapshot=json.dumps([{"name": k.name, "weight": str(k.weight), "target_value": k.target_value} for k in kpi_templates]) if kpi_templates else None,
+                kpi_snapshot=[{"name": k.name, "weight": str(k.weight), "target_value": k.target_value} for k in kpi_templates] if kpi_templates else None,
             )
             db.add(record)
             created += 1
@@ -432,7 +436,7 @@ def start_cycle(
                 position_id=emp.position_id,
                 department_id=emp.department_id,
                 status="pending_self",
-                kpi_snapshot=json.dumps([{"name": k.name, "weight": str(k.weight), "target_value": k.target_value} for k in kpi_templates]) if kpi_templates else None,
+                kpi_snapshot=[{"name": k.name, "weight": str(k.weight), "target_value": k.target_value} for k in kpi_templates] if kpi_templates else None,
             )
             db.add(record)
             created += 1
@@ -575,7 +579,8 @@ def list_cycle_employees(
 def cycle_progress(
     cycle_id: int,
     db: Session = Depends(get_db),
-    user = Depends(get_current_user),
+    # 周期进度含全员完成情况，属管理视角数据：仅管理/HR/经理/高管可读
+    user = Depends(require_role("admin", "hr", "manager", "executive")),
 ):
     cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == cycle_id).first()
     if not cycle:

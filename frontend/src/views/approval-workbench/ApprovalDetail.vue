@@ -293,9 +293,10 @@ export default {
     async loadDepartmentDistribution(departmentId) {
       try {
         const res = await getDepartmentDistribution(departmentId)
-        this.deptDistribution = res
+        this.deptDistribution = res && res.grades && res.grades.length ? res : null
       } catch (e) {
-        // API 可能不存在，静默失败
+        // 分布数据属辅助信息，失败时降级为「暂无数据」，但保留日志便于排查
+        console.warn('[ApprovalDetail] 加载部门等级分布失败', e)
         this.deptDistribution = null
       }
     },

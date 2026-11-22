@@ -11,6 +11,8 @@ from fastapi.responses import StreamingResponse
 from app.utils.pdf_generator import generate_performance_pdf
 from io import BytesIO
 
+from app.utils.json_columns import load_json
+
 router = APIRouter()
 
 
@@ -251,9 +253,9 @@ def get_employee_trend(
     result = []
     for r in records:
         cycle = db.query(AssessmentCycle).filter(AssessmentCycle.id == r.cycle_id).first()
-        self_scores = json.loads(r.self_scores) if r.self_scores else {}
-        manager_scores = json.loads(r.manager_scores) if r.manager_scores else {}
-        peer_scores = json.loads(r.peer_scores) if r.peer_scores else {}
+        self_scores = load_json(r.self_scores, {})
+        manager_scores = load_json(r.manager_scores, {})
+        peer_scores = load_json(r.peer_scores, {})
 
         result.append({
             "record_id": r.id,

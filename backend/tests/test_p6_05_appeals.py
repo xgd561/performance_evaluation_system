@@ -8,6 +8,7 @@ from app.models import (
     Notification, AppealRecord
 )
 from app.auth import get_password_hash
+from app.utils.json_columns import load_json
 
 
 class TestP6_05_Appeals:
@@ -184,8 +185,7 @@ class TestP6_05_Appeals:
 
         db_session.refresh(record)
         assert record.appeal_record is not None
-        import json
-        appeal_data = json.loads(record.appeal_record)
+        appeal_data = load_json(record.appeal_record, {})
         assert appeal_data["status"] == "pending"
         assert appeal_data["reason"] == reason
         assert appeal_data["detail"] == "自评与上级评分差距较大，评分依据不清晰，希望复核具体打分过程。"

@@ -2,6 +2,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
+# 鉴权实现统一以 app.auth 为唯一来源，app.core.security 仅做函数签名适配后转发
 from app.core.security import get_current_user, security
 from app.database import get_db
 from app.models import User
@@ -41,6 +42,11 @@ def require_role(*roles: str):
     def _role_checker(
         current_user: User = Depends(get_current_user),
     ) -> User:
+        if not current_user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="用户已被禁用",
+            )
         if current_user.role not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

@@ -6,7 +6,7 @@ from starlette.requests import Request
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import OperationLog
+from app.models import OperationLog, User
 from app.core.security import decode_token
 
 logger = logging.getLogger(__name__)
@@ -62,10 +62,20 @@ def _extract_token_user_id(request: Request) -> Optional[int]:
     payload = decode_token(token)
     if payload is None:
         return None
-    try:
-        return int(payload.get("sub"))
-    except (ValueError, TypeError):
+    sub = payload.get("sub")
+    if sub is None:
         return None
+    try:
+        return int(sub)
+    except (ValueError, TypeError):
+        pass
+    # 生产 token 的 sub 是用户名，回查用户表换算成用户 ID
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == str(sub)).first()
+        return user.id if user else None
+    finally:
+        db.close()
 
 
 def _extract_target_info(request: Request) -> tuple:
