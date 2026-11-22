@@ -216,16 +216,19 @@ class AssessmentCycleCreate(BaseModel):
     peer_due_date: Optional[date] = None
     peer_review_enabled: Optional[bool] = True
     department_ids: Optional[List[int]] = None
-    weights: Dict[str, int]
+    # 评分人权重（self/manager/peer 或按维度嵌套）；不传则由 config_service 全局默认值填充
+    weights: Optional[Dict[str, int]] = None
     grade_rules: Dict[str, Any]
     small_dept_exemption: Optional[bool] = True
 
     @field_validator('weights')
     @classmethod
     def check_weights_sum(cls, v):
+        if v is None:
+            return v
         total = sum(v.values())
         if total != 100:
-            raise ValueError(f"维度权重总和必须等于100，当前为{total}%")
+            raise ValueError(f"权重总和必须等于100，当前为{total}%")
         return v
 
     @field_validator('end_date')

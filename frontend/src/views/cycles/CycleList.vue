@@ -444,7 +444,7 @@ async function submitForm() {
       self_due_date: form.self_due_date || null,
       manager_due_date: form.manager_due_date || null,
       peer_due_date: form.peer_due_date || null,
-      weights: { self: 30, manager: 50, peer: 20 },
+      // 评分人权重交由后端取 config_service 全局默认值，前端不再硬编码
       grade_rules: { A: 90, B: 80, C: 60, D: 0 },
     }
     console.log('[DEBUG] submitForm payload:', payload)

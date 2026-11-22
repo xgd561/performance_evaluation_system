@@ -52,6 +52,7 @@ htmlcov/
 *.log
 backend/*.log
 frontend/*.log
+logs/*.txt
 
 # Test artifacts
 test-results/

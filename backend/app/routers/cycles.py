@@ -23,6 +23,7 @@ from app.schemas import (
 
 from app.services.operation_logger import log_operation
 from app.services.notification_service import create_notification
+from app.services import config_service
 from app.utils.workflow_state_machine import WorkflowStateMachine
 from app.utils.pdf_generator import generate_performance_pdf
 from app.services.pdf_archive_generator import generate_archive_pdf
@@ -187,6 +188,10 @@ def create_cycle(
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="考核周期名称已存在")
 
+    # 维度/评分人权重统一取全局配置默认值，避免本处硬编码与 config_service 口径分叉
+    dimension_weights = config_service.get_dimension_weights(db)
+    reviewer_weights = req.weights or config_service.get_reviewer_weights(db)
+
     cycle = AssessmentCycle(
         name=req.name,
         type=req.type,
@@ -196,8 +201,8 @@ def create_cycle(
         manager_due_date=req.manager_due_date,
         peer_due_date=req.peer_due_date,
         status="not_started",
-        dimension_weights=json.dumps({"performance": 50, "ability": 30, "attitude": 20}),
-        reviewer_weights=json.dumps(req.weights),
+        dimension_weights=json.dumps(dimension_weights),
+        reviewer_weights=json.dumps(reviewer_weights),
         grade_rules=json.dumps(normalized_grade_rules),
         small_dept_exemption=req.small_dept_exemption if req.small_dept_exemption is not None else True,
         peer_review_enabled=req.peer_review_enabled if req.peer_review_enabled is not None else True,

@@ -70,8 +70,11 @@ class AssessmentCycle(Base):
     manager_due_date = Column(Date, nullable=True)
     peer_due_date = Column(Date, nullable=True)
     status = Column(String(50), default="not_started")
+    # 权重列默认值与 config_service.get_dimension_weights / get_reviewer_weights 保持同值（60/20/20；
+    # 业绩 30/70/0、能力 20/60/20、态度 10/50/40），仅为直接创建模型（脚本/测试）时的兜底；
+    # 运行时权威口径以 config_service 为准（含 POST /assessment-cycles 创建周期）。
     dimension_weights = Column(JSON, nullable=False, default={"performance": 0.6, "ability": 0.2, "attitude": 0.2})
-    reviewer_weights = Column(JSON, nullable=False, default={"performance": {"self": 0.3, "manager": 0.7}, "ability": {"self": 0.2, "manager": 0.6, "peer": 0.2}, "attitude": {"self": 0.2, "manager": 0.8}})
+    reviewer_weights = Column(JSON, nullable=False, default={"performance": {"self": 0.3, "manager": 0.7, "peer": 0.0}, "ability": {"self": 0.2, "manager": 0.6, "peer": 0.2}, "attitude": {"self": 0.1, "manager": 0.5, "peer": 0.4}})
     grade_rules = Column(JSON, nullable=False, default={"A": {"min": 90, "max": 100, "ratio_limit": 0.2}, "B": {"min": 80, "max": 89.9, "ratio_limit": 0.5}, "C": {"min": 60, "max": 79.9, "ratio_limit": 0.25}, "D": {"min": 0, "max": 59.9, "ratio_limit": 0.05}})
     is_distribution_enabled = Column(Boolean, default=True)
     small_dept_exemption = Column(Boolean, default=True)

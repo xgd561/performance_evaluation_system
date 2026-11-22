@@ -283,11 +283,3 @@ def get_scoring_anchors(
 ):
     """Return scoring anchor constants for UI display."""
     return {"anchors": SCORING_ANCHORS}
-
-
-@router.get("/scoring-anchors")
-def get_scoring_anchors(
-    user = Depends(require_role("admin", "hr", "manager", "employee")),
-):
-    """Return scoring anchor reference data."""
-    return {"code": 200, "anchors": SCORING_ANCHORS}
