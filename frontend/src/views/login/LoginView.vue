@@ -1,71 +1,67 @@
 <template>
   <div class="login-container">
-    <div class="login-wrapper">
-      <div class="login-brand">
-        <div class="brand-icon-large">
-          <el-icon :size="40"><Histogram /></el-icon>
-        </div>
-        <div class="brand-title">绩效考核评分系统</div>
-        <div class="brand-subtitle">PERFORMANCE EVALUATION SYSTEM</div>
-        <div class="brand-divider"></div>
-        <div class="brand-desc">
-          科学、公正、高效的数字化绩效管理解决方案
-        </div>
-      </div>
+    <div class="login-sheet">
+      <span class="tape tape-tl" aria-hidden="true"></span>
+      <span class="tape tape-tr" aria-hidden="true"></span>
 
-      <div class="login-card">
-        <div class="login-card-header">
-          <div class="login-card-title">欢迎登录</div>
-          <div class="login-card-subtitle">请输入您的账号信息</div>
-        </div>
+      <header class="sheet-head">
+        <h1 class="brand-title">绩效考核评分系统</h1>
+        <p class="brand-sub">员工登录</p>
+        <div class="head-rule" aria-hidden="true"></div>
+      </header>
 
-        <el-form
-          :model="form"
-          :rules="rules"
-          ref="formRef"
-          @keyup.enter="handleLogin"
-          class="login-form"
-        >
-          <el-form-item prop="username">
-            <el-input
-              v-model="form.username"
-              placeholder="用户名"
-              :prefix-icon="User"
-              size="large"
-              clearable
-              class="login-input"
-            />
-          </el-form-item>
-          <el-form-item prop="password">
-            <el-input
-              v-model="form.password"
-              type="password"
-              placeholder="密码"
-              :prefix-icon="Lock"
-              show-password
-              size="large"
-              clearable
-              class="login-input"
-            />
-          </el-form-item>
-          <el-form-item>
-            <div class="login-options">
-              <el-checkbox v-model="form.rememberMe" class="remember-checkbox">记住我</el-checkbox>
-            </div>
-          </el-form-item>
-          <el-form-item>
-            <el-button
-              type="primary"
-              class="login-btn"
-              :loading="loading"
-              size="large"
-              @click="handleLogin"
-            >
-              <span class="btn-text">登录</span>
-              <el-icon class="btn-icon"><ArrowRight /></el-icon>
-            </el-button>
-          </el-form-item>
-        </el-form>
+      <el-form
+        :model="form"
+        :rules="rules"
+        ref="formRef"
+        @keyup.enter="handleLogin"
+        class="login-form"
+      >
+        <el-form-item prop="username">
+          <el-input
+            v-model="form.username"
+            placeholder="用户名"
+            :prefix-icon="User"
+            size="large"
+            clearable
+            class="login-input"
+          />
+        </el-form-item>
+        <el-form-item prop="password">
+          <el-input
+            v-model="form.password"
+            type="password"
+            placeholder="密码"
+            :prefix-icon="Lock"
+            show-password
+            size="large"
+            clearable
+            class="login-input"
+          />
+        </el-form-item>
+        <el-form-item>
+          <div class="login-options">
+            <el-checkbox v-model="form.rememberMe" class="remember-checkbox">记住我</el-checkbox>
+          </div>
+        </el-form-item>
+        <el-form-item>
+          <el-button
+            type="primary"
+            class="login-btn"
+            :loading="loading"
+            size="large"
+            @click="handleLogin"
+          >
+            <span class="btn-text">登录</span>
+            <el-icon class="btn-icon"><ArrowRight /></el-icon>
+          </el-button>
+        </el-form-item>
+      </el-form>
+
+      <p class="first-login-note">首次登录需先修改初始密码</p>
+
+      <div class="seal" aria-hidden="true">
+        <span class="seal-text">绩效<br />考核</span>
       </div>
     </div>
 
@@ -140,7 +136,7 @@
 import { reactive, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { User, Lock, ArrowRight, Histogram, InfoFilled } from '@element-plus/icons-vue'
+import { User, Lock, ArrowRight, InfoFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
@@ -287,293 +283,320 @@ async function handleChangePassword() {
 </script>
 
 <style scoped>
+/* ------------------------------------------------------------------
+   Lo-Fi anchor: 纸质考核表贴在公告栏上
+   Surfaces: #EDE4CF / #E8E0C0 (paper-yellow, not cream)
+   Type: Times/SimSun display + Helvetica body + Courier form
+   Texture: halftone dots, riso misregistration, tape
+------------------------------------------------------------------ */
+
 .login-container {
+  --ink: #241e12;
+  --ink-soft: #4a4030;
+  --ink-muted: #6b5d40;
+  --paper: #ede4cf;
+  --paper-deep: #e8e0c0;
+  --stamp: #b0312a;
+
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 40%, #312e81 100%);
+  padding: 40px 20px;
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(rgba(36, 30, 18, 0.09) 1px, transparent 1.5px),
+    radial-gradient(rgba(36, 30, 18, 0.05) 1px, transparent 1.5px);
+  background-size: 18px 18px, 18px 18px;
+  background-position: 0 0, 9px 9px;
+  font-family: 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+/* ---------- 纸质登录表 ---------- */
+
+.login-sheet {
   position: relative;
-  overflow: hidden;
-  padding: 24px;
-}
-
-/* Decorative background elements */
-.login-container::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  left: -20%;
-  width: 80%;
-  height: 150%;
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);
-  pointer-events: none;
-}
-
-.login-container::after {
-  content: '';
-  position: absolute;
-  bottom: -30%;
-  right: -10%;
-  width: 60%;
-  height: 100%;
-  background: radial-gradient(circle, rgba(245, 158, 11, 0.08) 0%, transparent 60%);
-  pointer-events: none;
-}
-
-.login-wrapper {
-  display: flex;
   width: 100%;
-  max-width: 960px;
-  min-height: 520px;
-  border-radius: var(--radius-xl);
-  overflow: hidden;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
-  position: relative;
-  z-index: 1;
+  max-width: 400px;
+  background: var(--paper-deep);
+  border: 1px solid rgba(36, 30, 18, 0.55);
+  padding: 48px 38px 40px;
+  transform: rotate(-2deg);
+  box-shadow: 0 12px 26px rgba(60, 48, 20, 0.28);
 }
 
-/* Brand side */
-.login-brand {
-  flex: 1;
-  background: linear-gradient(160deg, var(--primary-color) 0%, var(--primary-dark) 60%, #312e81 100%);
-  padding: 48px 40px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: flex-start;
-  color: #fff;
-  position: relative;
-  overflow: hidden;
-}
-
-.login-brand::before {
-  content: '';
+/* 胶带 */
+.tape {
   position: absolute;
-  top: -40px;
-  right: -40px;
-  width: 180px;
-  height: 180px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.06);
+  top: -13px;
+  width: 96px;
+  height: 26px;
+  background: linear-gradient(100deg, rgba(255, 252, 230, 0.78), rgba(244, 236, 198, 0.62));
+  border-left: 1px dashed rgba(60, 48, 20, 0.28);
+  border-right: 1px dashed rgba(60, 48, 20, 0.28);
+  box-shadow: 0 1px 3px rgba(60, 48, 20, 0.22);
   pointer-events: none;
 }
 
-.login-brand::after {
-  content: '';
-  position: absolute;
-  bottom: -60px;
-  left: -20px;
-  width: 200px;
-  height: 200px;
-  border-radius: 50%;
-  background: rgba(245, 158, 11, 0.08);
-  pointer-events: none;
+.tape-tl {
+  left: 26px;
+  transform: rotate(-5deg);
 }
 
-.brand-icon-large {
-  width: 64px;
-  height: 64px;
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(10px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 24px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+.tape-tr {
+  right: 26px;
+  transform: rotate(4deg);
 }
 
-.brand-title {
-  font-size: 24px;
-  font-weight: 800;
-  letter-spacing: -0.3px;
-  margin-bottom: 6px;
-  line-height: 1.2;
-}
+/* ---------- 表头 ---------- */
 
-.brand-subtitle {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 2px;
-  opacity: 0.7;
-  text-transform: uppercase;
-  margin-bottom: 20px;
-}
-
-.brand-divider {
-  width: 40px;
-  height: 3px;
-  background: linear-gradient(90deg, var(--accent-color), rgba(245, 158, 11, 0.3));
-  border-radius: 2px;
-  margin-bottom: 20px;
-}
-
-.brand-desc {
-  font-size: 14px;
-  opacity: 0.8;
-  line-height: 1.6;
-  font-weight: 400;
-  max-width: 280px;
-}
-
-/* Login card side */
-.login-card {
-  flex: 1;
-  background: var(--bg-card);
-  padding: 48px 40px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.login-card-header {
+.sheet-head {
   margin-bottom: 28px;
 }
 
-.login-card-title {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--text-primary);
-  margin-bottom: 6px;
-  letter-spacing: -0.2px;
+.brand-title {
+  margin: 0 0 8px;
+  font-family: 'Times New Roman', 'Songti SC', 'SimSun', serif;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  line-height: 1.25;
+  color: var(--ink);
+  /* Risograph 套准错位 */
+  text-shadow: 2px 0 rgba(255, 0, 110, 0.32), -2px 0 rgba(0, 255, 204, 0.32);
 }
 
-.login-card-subtitle {
+.brand-sub {
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
   font-size: 13px;
-  color: var(--text-muted);
-  font-weight: 500;
+  letter-spacing: 5px;
+  color: var(--ink-muted);
 }
+
+/* 表格双线 */
+.head-rule {
+  margin-top: 16px;
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  height: 3px;
+}
+
+/* ---------- 表单 ---------- */
 
 .login-form :deep(.el-input__wrapper) {
-  border-radius: var(--radius-md);
-  padding: 2px 14px;
-  box-shadow: 0 0 0 1px var(--border-color) inset;
-  transition: all var(--transition-fast);
+  background: var(--paper);
+  border: 1px solid rgba(36, 30, 18, 0.6);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 2px 12px;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .login-form :deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px var(--primary-light) inset;
+  border-color: var(--ink);
+  box-shadow: none;
 }
 
 .login-form :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--primary-color) inset, 0 0 0 4px rgba(99, 102, 241, 0.08);
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 rgba(36, 30, 18, 0.25);
 }
 
 .login-form :deep(.el-input__inner) {
-  height: 44px;
+  height: 42px;
+  font-family: 'Courier New', Courier, monospace;
   font-size: 14px;
-  font-weight: 500;
+  color: var(--ink);
+}
+
+.login-form :deep(.el-input__inner::placeholder) {
+  color: #8a7b5c;
+  letter-spacing: 2px;
 }
 
 .login-form :deep(.el-input__prefix) {
-  color: var(--text-muted);
+  color: var(--ink-muted);
 }
 
 .login-options {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  width: 100%;
 }
 
 .remember-checkbox :deep(.el-checkbox__label) {
   font-size: 13px;
-  color: var(--text-secondary);
-  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.remember-checkbox :deep(.el-checkbox__inner) {
+  border-radius: 0;
+  background: var(--paper);
+  border-color: rgba(36, 30, 18, 0.6);
 }
 
 .remember-checkbox :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
-  background-color: var(--primary-color);
-  border-color: var(--primary-color);
+  background-color: var(--ink);
+  border-color: var(--ink);
 }
+
+/* ---------- 登录按钮 ---------- */
 
 .login-btn {
   width: 100%;
-  height: 48px;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  border-radius: var(--radius-md);
+  height: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-  border: none;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
-  transition: all var(--transition-fast);
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  transform: rotate(1deg);
+  box-shadow: 3px 3px 0 rgba(36, 30, 18, 0.3);
+  transition: transform 0.12s, box-shadow 0.12s;
 }
 
 .login-btn:hover {
-  background: linear-gradient(135deg, var(--primary-dark) 0%, #4338ca 100%);
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.45);
-  transform: translateY(-1px);
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+  transform: rotate(1deg) translate(1px, 1px);
+  box-shadow: 2px 2px 0 rgba(36, 30, 18, 0.3);
 }
 
 .login-btn:active {
-  transform: translateY(0);
-}
-
-.btn-text {
-  position: relative;
-  top: 1px;
+  transform: rotate(1deg) translate(3px, 3px);
+  box-shadow: none;
 }
 
 .btn-icon {
-  transition: transform var(--transition-fast);
+  transition: none;
 }
 
-.login-btn:hover .btn-icon {
-  transform: translateX(3px);
+/* ---------- 首次登录提示 ---------- */
+
+.first-login-note {
+  display: inline-block;
+  margin: 16px 0 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--ink-muted);
+  transform: rotate(2deg);
 }
 
-/* Password Dialog */
+/* ---------- 红章 ---------- */
+
+.seal {
+  position: absolute;
+  right: -22px;
+  bottom: 58px;
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  border: 3px double var(--stamp);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(-14deg);
+  opacity: 0.82;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.seal-text {
+  font-family: 'Times New Roman', 'Songti SC', 'SimSun', serif;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  line-height: 1.15;
+  text-align: center;
+  color: var(--stamp);
+}
+
+/* ---------- 修改密码弹窗 ---------- */
+
+.password-dialog :deep(.el-dialog) {
+  background: var(--paper);
+  border: 1px solid rgba(36, 30, 18, 0.55);
+  border-radius: 0;
+  transform: rotate(-2deg);
+  box-shadow: 0 14px 30px rgba(60, 48, 20, 0.32);
+}
+
 .password-dialog :deep(.el-dialog__header) {
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-  padding: 20px 24px;
+  background: transparent;
+  border-bottom: 2px solid var(--ink);
+  padding: 18px 22px 12px;
   margin-right: 0;
 }
 
 .password-dialog :deep(.el-dialog__title) {
-  color: #fff;
+  font-family: 'Times New Roman', 'Songti SC', 'SimSun', serif;
+  font-size: 17px;
   font-weight: 700;
-  font-size: 16px;
+  letter-spacing: 1px;
+  color: var(--ink);
 }
 
-.password-dialog :deep(.el-dialog__headerbtn .el-dialog__close) {
-  color: rgba(255, 255, 255, 0.7);
+.password-dialog :deep(.el-dialog__body) {
+  color: var(--ink-soft);
+  font-family: 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
-.password-dialog :deep(.el-dialog__headerbtn .el-dialog__close:hover) {
-  color: #fff;
+.password-dialog :deep(.el-form-item__label) {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.password-dialog :deep(.el-input__wrapper) {
+  background: var(--paper-deep);
+  border: 1px solid rgba(36, 30, 18, 0.6);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.password-dialog :deep(.el-input__wrapper.is-focus) {
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 rgba(36, 30, 18, 0.25);
 }
 
 .dialog-tip {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(245, 158, 11, 0.02) 100%);
-  border: 1px solid rgba(245, 158, 11, 0.15);
-  color: var(--text-secondary);
+  padding: 10px 14px;
+  background: var(--paper-deep);
+  border: 1px solid rgba(36, 30, 18, 0.5);
+  border-left: 4px solid var(--stamp);
+  border-radius: 0;
+  color: var(--ink-soft);
   font-size: 13px;
-  font-weight: 500;
   margin-bottom: 16px;
 }
 
 .tip-icon {
-  color: var(--accent-color);
+  color: var(--stamp);
   flex-shrink: 0;
 }
 
-/* Password Strength Bar */
+/* ---------- 密码强度 ---------- */
+
 .strength-bar {
   margin-top: 16px;
-  padding: 16px;
-  border-radius: var(--radius-md);
-  background: var(--bg-color);
-  border: 1px solid var(--border-light);
+  padding: 14px 16px;
+  background: var(--paper-deep);
+  border: 1px dashed rgba(36, 30, 18, 0.5);
+  border-radius: 0;
 }
 
 .strength-header {
@@ -584,58 +607,60 @@ async function handleChangePassword() {
 }
 
 .strength-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--ink-muted);
 }
 
 .strength-value {
-  font-size: 13px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
   font-weight: 700;
-  padding: 2px 10px;
-  border-radius: 20px;
-  letter-spacing: 0.5px;
+  padding: 1px 8px;
+  border-radius: 0;
+  letter-spacing: 1px;
 }
 
 .strength-value.weak {
-  color: var(--danger-color);
-  background: rgba(239, 68, 68, 0.08);
+  color: var(--stamp);
+  background: rgba(176, 49, 42, 0.12);
 }
 
 .strength-value.medium {
-  color: var(--accent-color);
-  background: rgba(245, 158, 11, 0.08);
+  color: #8a6a1b;
+  background: rgba(184, 134, 11, 0.14);
 }
 
 .strength-value.strong {
-  color: var(--success-color);
-  background: rgba(16, 185, 129, 0.08);
+  color: #3e6b34;
+  background: rgba(62, 107, 52, 0.12);
 }
 
 .strength-track {
   height: 6px;
-  background: var(--border-color);
-  border-radius: 3px;
+  background: rgba(36, 30, 18, 0.15);
+  border-radius: 0;
   overflow: hidden;
   margin-bottom: 12px;
 }
 
 .strength-fill {
   height: 100%;
-  border-radius: 3px;
-  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.4s;
+  border-radius: 0;
+  transition: width 0.3s;
 }
 
 .strength-fill.weak {
-  background: linear-gradient(90deg, var(--danger-color), #f87171);
+  background: var(--stamp);
 }
 
 .strength-fill.medium {
-  background: linear-gradient(90deg, var(--accent-color), #fbbf24);
+  background: #b8860b;
 }
 
 .strength-fill.strong {
-  background: linear-gradient(90deg, var(--success-color), #34d399);
+  background: #3e6b34;
 }
 
 .strength-tips {
@@ -649,11 +674,9 @@ async function handleChangePassword() {
 
 .strength-tips li {
   font-size: 12px;
-  color: var(--text-muted);
-  font-weight: 500;
+  color: var(--ink-muted);
   padding-left: 18px;
   position: relative;
-  transition: all var(--transition-fast);
 }
 
 .strength-tips li::before {
@@ -662,22 +685,20 @@ async function handleChangePassword() {
   left: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
-  border: 2px solid var(--border-color);
-  transition: all var(--transition-fast);
+  border: 2px solid rgba(36, 30, 18, 0.4);
 }
 
 .strength-tips li.ok {
-  color: var(--success-color);
+  color: #3e6b34;
   font-weight: 600;
 }
 
 .strength-tips li.ok::before {
-  border-color: var(--success-color);
-  background: var(--success-color);
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.3);
+  border-color: #3e6b34;
+  background: #3e6b34;
 }
 
 .strength-tips li.ok::after {
@@ -688,33 +709,46 @@ async function handleChangePassword() {
   transform: translateY(-50%) rotate(45deg);
   width: 4px;
   height: 6px;
-  border-right: 2px solid #fff;
-  border-bottom: 2px solid #fff;
+  border-right: 2px solid var(--paper);
+  border-bottom: 2px solid var(--paper);
 }
 
 .confirm-btn {
   width: 100%;
   height: 42px;
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  font-family: 'Courier New', Courier, monospace;
   font-weight: 700;
-  letter-spacing: 0.5px;
+  letter-spacing: 4px;
 }
 
-/* Mobile */
-@media (max-width: 768px) {
-  .login-wrapper {
-    flex-direction: column;
-    min-height: auto;
+.confirm-btn:hover {
+  background: #3a3222;
+  color: var(--paper);
+  border-color: #3a3222;
+}
+
+/* ---------- Mobile ---------- */
+
+@media (max-width: 480px) {
+  .login-sheet {
+    padding: 40px 26px 34px;
+    transform: rotate(-1deg);
   }
-  .login-brand {
-    padding: 32px 24px;
-    align-items: center;
-    text-align: center;
+  .brand-title {
+    font-size: 25px;
   }
-  .brand-desc {
-    max-width: 100%;
+  .seal {
+    width: 70px;
+    height: 70px;
+    right: -12px;
+    bottom: 52px;
   }
-  .login-card {
-    padding: 32px 24px;
+  .seal-text {
+    font-size: 14px;
   }
 }
 </style>
