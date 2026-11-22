@@ -207,7 +207,19 @@ cd frontend && npm run dev
   - 未触发强制分布调整 → `pending_approval`，直接进入审批工作台
   - 触发强制分布调整（等级被降级/特批候选人）→ `pending_distribution_review`，需 HR 在分布审核页调用 `POST /scores/cycles/{cycle_id}/confirm-distribution` 确认后才进入 `pending_approval`
 - 审批工作台 `GET /approvals/pending`（`approvals.py`）仅查询 `status == "pending_approval"` 的记录，`approve_record` 同样强校验该状态；记录停留在 `pending_summary` / `pending_distribution_review` 属于中间审核态，不在审批台展示是设计行为，不是缺陷
+- 审批台还要按审批链步骤过滤：经理看直属下属（`direct_manager` 步）、部门负责人看本部门（`dept_head` 步）、**HR 仅在轮到 `hr_head` 步时才可见**，不允许越级提前处理；`admin` 可代任何步骤。步骤判定方式是把每条记录已通过的 `step_index` 最大值与角色在链中的下标比对
+- `approve_record` 与 `submit_self_score` 不再让 `WorkflowStateMachine.transition` 落库日志，改由调用方写一条业务语义日志（如 `approve` / `self_score_submit`），避免同一动作产生两条操作日志
 - **缺陷修复记录**：早期版本 calculate 后记录停留在 `pending_summary` 导致审批台为空（E2E 曾用“缺陷分支”绕过）；当前后端已实现 `trigger_summary` 流转并有测试覆盖（`test_p5_16_summary.py::test_calculate_no_adjustment_pending_approval`），E2E `full-cycle-scenarios.spec.ts` Step 6 已改为先用测试辅助接口 `advance-to-approval` 推回 `pending_approval` 后走真实审批交互断言
+
+### 数据可见范围（个人级查询）
+
+- 经理角色的授权范围是「本人 → 直接/间接下属链 → 下辖子部门」，但不同接口口径不同：
+  - 员工档案详情 `GET /employees/{id}`：同部门即可查看（P0-7）
+  - 考核记录详情、个人绩效趋势、面谈详情与面谈历史：**同部门非下属返回 403**，仅下属链与下辖子部门成员可见（P0-8 / P0-9 / P0-10 / P1-14），同时要保留 P1-20 的子部门可见性
+- 实现上拆成两个助手（`app/routers/employees.py`）：
+  - `get_all_dept_ids()`：本部门 + 全部子树，供员工列表、评分汇总、仪表盘等列表类接口使用
+  - `get_descendant_dept_ids()`：仅下辖子部门（不含本部门），供上述个人级查询使用；两者之差正是「同部门非下属」
+- 改动可见性时务必同时回归 `test_p07`–`test_p10`、`test_p14`、`test_p20`，它们分别锁死「同部门非下属 403」与「子部门成员 200」两个相反方向
 
 ### 强制分布降级算法（`services/distribution_enforcer.py`）
 
@@ -267,6 +279,7 @@ cd frontend && npm run dev
 - `app/routers/approvals.py` 的 `get_pending_approvals` 已改为 SQL 预过滤（P1-23），避免全表遍历
 - `app/routers/dashboard.py` 的统计已按角色隔离（P1-21），管理员/HR 看全局，经理看团队，员工只看自己
 - `app/routers/scores.py` 的加权计算逻辑：当存在 KPI 快照时，业绩维度得分由 KPI 得分替代；经理与自评差异超过 20 分时会标记异常
+- `app/services/score_calculator.py` 的维度分（2 位）与总分（1 位）统一用 `Decimal` + `ROUND_HALF_UP`：`round()` 叠加浮点误差会把 85.85 舍成 85.8；总分也须用 `Decimal` 累加，否则 `84.1*0.5 + 86.4*0.3 + 89.4*0.2` 会得到 85.84999999999999 而向错的方向舍入
 - `frontend/vite.config.js` 的代理目标端口是 `8000`（与 `restart-services.bat`、`backend/restart.bat`、`scripts/restart.bat` 一致）
 - 前端 `request.js` 的响应拦截器**只将数字类型的 `code` 视为业务状态码**，避免字符串编码（如部门 `code`）被误判
 
