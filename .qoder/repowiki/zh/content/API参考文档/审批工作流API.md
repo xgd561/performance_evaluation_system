@@ -17,6 +17,9 @@
 - [backend/tests/test_p6_06_appeal_resolve.py](file://backend/tests/test_p6_06_appeal_resolve.py)
 - [backend/tests/test_p6_09_appeal_review_final.py](file://backend/tests/test_p6_09_appeal_review_final.py)
 - [backend/tests/test_p21_dashboard_role_scoped_stats.py](file://backend/tests/test_p21_dashboard_role_scoped_stats.py)
+- [backend/tests/test_p23_pending_approvals_no_full_table_scan.py](file://backend/tests/test_p23_pending_approvals_no_full_table_scan.py)
+- [backend/tests/test_approval_chain.py](file://backend/tests/test_approval_chain.py)
+- [backend/tests/test_p5_17_approval.py](file://backend/tests/test_p5_17_approval.py)
 - [frontend/src/api/approvals.js](file://frontend/src/api/approvals.js)
 - [frontend/src/api/appeals.js](file://frontend/src/api/appeals.js)
 - [frontend/src/views/appeal/AppealList.vue](file://frontend/src/views/appeal/AppealList.vue)
@@ -25,6 +28,13 @@
 - [frontend/src/views/approval-workbench/ApprovalWorkbench.vue](file://frontend/src/views/approval-workbench/ApprovalWorkbench.vue)
 - [frontend/src/views/approval-workbench/ApprovalDetail.vue](file://frontend/src/views/approval-workbench/ApprovalDetail.vue)
 </cite>
+
+## 更新摘要
+**已进行的变更**   
+- 更新了待审批列表与权限控制部分，详细说明HR人员的步骤特定可见性机制
+- 新增了HR角色权限控制的详细逻辑说明
+- 添加了防止"越级审批"的约束条件说明
+- 更新了相关测试用例的引用和说明
 
 ## 目录
 1. [文档目标与适用范围](#文档目标与适用范围)
@@ -47,9 +57,10 @@
 18. [结论与扩展建议](#结论与扩展建议)
 
 ## 文档目标与适用范围
-本文面向绩效考核系统中的“审批工作流”和“申诉处理”能力，重点说明以下方面：
+本文面向绩效考核系统中的"审批工作流"和"申诉处理"能力，重点说明以下方面：
 - 多级审批流程的配置、执行、监控接口规范。
 - 审批节点流转规则、审批权限控制、审批意见记录。
+- **新增** HR人员步骤特定可见性机制，防止越级审批。
 - 申诉从提交到最终裁决的完整管理流程。
 - 审批历史追溯与审批链路可视化支撑点。
 - 当前实现中已具备或尚未实现的超时处理、自动升级、并行审批等高级特性。
@@ -102,8 +113,6 @@ AppealRouter --> Models
 - 申诉记录：记录员工对已发布结果的申诉原因、详情、处理状态、复核结果和处理时间。
 - 系统配置：存储审批链配置，如默认顺序为直属上级、部门负责人、HR负责人等。
 - 归档保护：防止已归档周期中的记录被修改。
-
-> 本图为局部关系片段，完整实体关系与约束以 [ER图设计.md](../系统架构/数据库架构设计/ER图设计.md) 为唯一权威来源。
 
 ```mermaid
 erDiagram
@@ -183,7 +192,7 @@ DEPARTMENT ||--o{ ASSESSMENT_RECORD : "归属"
 - [backend/app/routers/appeals.py:7-8](file://backend/app/routers/appeals.py#L7-L8)
 
 ## 系统架构总览
-审批工作流由“路由层 + 状态机 + 数据模型 + 日志与通知”组成：
+审批工作流由"路由层 + 状态机 + 数据模型 + 日志与通知"组成：
 - 路由层负责接收请求、参数校验、权限检查、业务编排。
 - 状态机负责定义合法状态与动作转换，保证流程一致性。
 - 数据模型持久化考核记录、审批记录、申诉记录。
@@ -250,34 +259,65 @@ Note over Router,Notify : "申诉流程中会触发通知服务"
   - `is_abnormal`：是否强制分布异常标记。
   - `is_force_adjusted`：是否强制调整（原始等级与当前等级不一致）。
   - `step`：按审批步骤过滤（1 表示第一步，2 表示第二步）。
-- 权限逻辑：
+- **更新** 权限逻辑：
   - 根据用户身份与审批链角色动态构建查询条件。
   - 直属经理只能看到自己下属的记录。
   - 部门负责人能看到本部门记录。
-  - HR/管理员能看到全局待审批记录。
+  - **HR人员步骤特定可见性**：HR用户只能在轮到其特定步骤（hr_head）时看到待审批记录，防止"越级审批"或提前看到仍在早期审批阶段的记录。
+  - 管理员可代任何步骤处理所有待审批记录。
 - 性能优化：
   - 使用子查询计算每条记录已通过的最大步骤序号，避免全表扫描。
   - 预计算下属 ID 与部门 ID，减少重复查询。
+
+**更新** HR权限控制逻辑详解：
+```python
+elif role in ("hr_head", "hr") and user.role in ("hr", "admin"):
+    if user.role == "admin":
+        # 管理员可代任何步骤处理
+        conditions.append(AssessmentRecord.status == "pending_approval")
+    else:
+        # HR 只在轮到 hr_head 步骤时可见，避免提前看到前序步骤的记录
+        conditions.append(
+            and_(
+                AssessmentRecord.status == "pending_approval",
+                func.coalesce(step_counts.c.max_step, 0) == step_idx,
+            )
+        )
+```
+
+**关键约束**：
+- HR用户只能在其特定步骤（hr_head）激活时看到记录
+- 如果记录仍处于早期审批阶段（如direct_manager或dept_head），HR无法看到
+- 这防止了"step-skipping"或过早可见性，确保审批流程的顺序性
 
 ```mermaid
 flowchart TD
 Start(["进入待审批列表"]) --> LoadChain["加载审批链配置"]
 LoadChain --> BuildConditions["根据用户角色构建查询条件"]
-BuildConditions --> StepFilter{"是否指定步骤?"}
-StepFilter --> |是| ApplyStep["按步骤过滤"]
-StepFilter --> |否| QueryRecords["查询 pending_approval 记录"]
-ApplyStep --> QueryRecords
+BuildConditions --> RoleCheck{"用户角色检查"}
+RoleCheck --> |HR用户| HRStepCheck["检查是否在hr_head步骤"]
+RoleCheck --> |管理员| AdminAccess["管理员可访问所有步骤"]
+RoleCheck --> |其他角色| StandardFilter["标准角色过滤"]
+HRStepCheck --> StepValidation{"步骤验证"}
+StepValidation --> |是| IncludeRecord["包含该记录"]
+StepValidation --> |否| ExcludeRecord["排除该记录"]
+AdminAccess --> IncludeRecord
+StandardFilter --> QueryRecords["查询 pending_approval 记录"]
+IncludeRecord --> QueryRecords
+ExcludeRecord --> QueryRecords
 QueryRecords --> EnrichData["补充员工、部门、岗位、周期信息"]
 EnrichData --> ComputeAlerts["计算异常标记与评分差异预警"]
 ComputeAlerts --> ReturnList["返回待审批列表"]
 ```
 
 **图表来源**
-- [backend/app/routers/approvals.py:153-311](file://backend/app/routers/approvals.py#L153-L311)
+- [backend/app/routers/approvals.py:190-230](file://backend/app/routers/approvals.py#L190-L230)
 
 **章节来源**
 - [backend/app/routers/approvals.py:153-311](file://backend/app/routers/approvals.py#L153-L311)
 - [backend/tests/test_p5_06_approvals_list.py:254-291](file://backend/tests/test_p5_06_approvals_list.py#L254-L291)
+- [backend/tests/test_p23_pending_approvals_no_full_table_scan.py:214-281](file://backend/tests/test_p23_pending_approvals_no_full_table_scan.py#L214-L281)
+- [backend/tests/test_approval_chain.py:152-174](file://backend/tests/test_approval_chain.py#L152-L174)
 
 ## 审批详情与历史追溯
 ### 获取审批详情
@@ -580,6 +620,7 @@ published --> archived : "archive"
 ### 并发安全
 - 重复审批防护：通过检查同一审批人在同一步骤的动作记录，防止重复通过、驳回、打回。
 - 归档保护：所有写操作前调用归档保护，防止对已归档周期的记录进行修改。
+- **新增** HR步骤特定可见性：通过步骤索引验证确保HR只能在其特定步骤访问记录，防止并发条件下的越级访问。
 
 **章节来源**
 - [backend/app/routers/approvals.py:477-492](file://backend/app/routers/approvals.py#L477-L492)
@@ -588,7 +629,7 @@ published --> archived : "archive"
 - [backend/app/routers/archive_guard.py:6-28](file://backend/app/routers/archive_guard.py#L6-L28)
 
 ## 统计分析与绩效评估接口现状
-当前仓库中并未暴露专门的“审批统计分析”或“绩效评估指标”REST 接口。但可从现有数据源推导统计口径：
+当前仓库中并未暴露专门的"审批统计分析"或"绩效评估指标"REST 接口。但可从现有数据源推导统计口径：
 - 待审批数量：基于 `AssessmentRecord.status == "pending_approval"` 计数。
 - 申诉数量：基于 `AppealRecord.status` 分类计数。
 - 审批通过率：基于 `ApprovalRecord.action == "approved"` 与总审批次数比例。
@@ -639,6 +680,7 @@ AppealsRouter --> Notification["notification_service.py"]
 ## 性能与可观测性
 ### 性能优化
 - 待审批列表查询避免全表扫描，使用子查询与预计算关系数据。
+- **新增** HR步骤特定可见性通过步骤索引比较实现高效过滤，避免不必要的数据库查询。
 - 审批详情返回历史评分与审批历史，注意分页与限制条数以避免大对象响应。
 - 申诉列表与详情返回关联实体信息，建议在大数据量场景下按需加载。
 
@@ -646,6 +688,7 @@ AppealsRouter --> Notification["notification_service.py"]
 - 所有关键操作均记录操作日志，便于审计与回溯。
 - 申诉流程中向 HR 与申诉人发送通知，便于跟踪处理进度。
 - 状态机转换过程中记录状态变更日志，便于问题定位。
+- **新增** HR访问控制日志，便于监控潜在的越级访问尝试。
 
 **章节来源**
 - [backend/app/routers/approvals.py:169-222](file://backend/app/routers/approvals.py#L169-L222)
@@ -655,12 +698,17 @@ AppealsRouter --> Notification["notification_service.py"]
 
 ## 故障排查指南
 常见问题与排查要点：
-- 审批失败提示“无权审批此记录”：
+- 审批失败提示"无权审批此记录"：
   - 检查当前用户是否为该步骤的合法审批角色。
   - 确认记录状态为 `pending_approval`。
   - 确认未被归档。
+  - **新增** 对于HR用户，确认记录是否已推进到hr_head步骤。
 - 重复审批冲突：
   - 检查是否存在同一审批人在同一步骤的重复动作记录。
+- HR无法看到待审批记录：
+  - 确认记录是否已完成前序审批步骤（direct_manager和dept_head）。
+  - 检查审批链配置是否正确。
+  - 验证步骤索引计算是否正确。
 - 申诉无法发起：
   - 确认考核记录状态为 `published`。
   - 确认记录未被归档。
@@ -688,6 +736,7 @@ AppealsRouter --> Notification["notification_service.py"]
   - 查看审批详情。
   - 执行通过、驳回、打回重评。
   - 查看审批历史。
+  - **新增** HR用户界面应显示步骤指示器，明确当前记录所处的审批阶段。
 
 **章节来源**
 - [frontend/src/views/approval-workbench/ApprovalWorkbench.vue](file://frontend/src/views/approval-workbench/ApprovalWorkbench.vue)
@@ -713,6 +762,7 @@ AppealsRouter --> Notification["notification_service.py"]
 当前审批工作流实现了：
 - 可配置的审批链。
 - 多级审批的执行与权限控制。
+- **新增** HR人员步骤特定可见性机制，防止越级审批。
 - 审批详情、历史追溯与操作审计。
 - 强制分布特批流程。
 - 申诉从提交到终审的完整闭环。
@@ -722,9 +772,11 @@ AppealsRouter --> Notification["notification_service.py"]
 - 审批超时自动升级与并行审批。
 - 专门的审批统计与绩效评估 REST 接口。
 - 更细粒度的审批链路可视化数据接口（如步骤级耗时、角色通过率）。
+- **新增** HR访问控制审计日志的详细分析接口。
 
 建议后续扩展：
 - 在状态机中注册基于时间的校验函数，实现超时与自动升级。
 - 扩展审批链数据结构，支持并行审批与条件分支。
 - 新增统计接口，聚合审批通过率、平均时长、部门/角色维度指标。
 - 提供审批链路可视化数据接口，便于前端绘制流程图与热力图。
+- **新增** HR访问模式分析接口，帮助识别潜在的审批流程瓶颈。

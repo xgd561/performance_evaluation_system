@@ -8,7 +8,15 @@
 - [backend/app/core/security.py](file://backend/app/core/security.py)
 - [backend/app/core/dependencies.py](file://backend/app/core/dependencies.py)
 - [backend/app/routers/departments.py](file://backend/app/routers/departments.py)
+- [backend/tests/test_p7_05_injection_xss.py](file://backend/tests/test_p7_05_injection_xss.py)
 </cite>
+
+## 更新摘要
+**变更内容**   
+- 新增HTML输入验证功能，防止XSS攻击
+- 在创建和更新员工时自动验证并拒绝包含HTML标签的名称
+- 添加安全测试用例验证HTML过滤机制
+- 增强数据安全性，防止恶意脚本注入
 
 ## 目录
 1. [简介](#简介)
@@ -16,16 +24,17 @@
 3. [核心组件](#核心组件)
 4. [架构总览](#架构总览)
 5. [详细接口规范](#详细接口规范)
-6. [数据模型与字段定义](#数据模型与字段定义)
-7. [权限控制与数据隔离](#权限控制与数据隔离)
-8. [批量导入导出](#批量导入导出)
-9. [依赖关系分析](#依赖关系分析)
-10. [性能与事务](#性能与事务)
-11. [故障排查](#故障排查)
-12. [结论](#结论)
+6. [数据安全与输入验证](#数据安全与输入验证)
+7. [数据模型与字段定义](#数据模型与字段定义)
+8. [权限控制与数据隔离](#权限控制与数据隔离)
+9. [批量导入导出](#批量导入导出)
+10. [依赖关系分析](#依赖关系分析)
+11. [性能与事务](#性能与事务)
+12. [故障排查](#故障排查)
+13. [结论](#结论)
 
 ## 简介
-本文件面向“员工管理”相关后端 API，覆盖员工的增删改查、批量导入、预览、模板下载、组织架构关联（部门、岗位、上级）、分页查询、条件筛选、权限控制与数据隔离等能力。文档同时给出数据模型、校验规则、错误处理与事务机制说明，帮助前后端开发者快速对接并保证系统安全与一致性。
+本文件面向"员工管理"相关后端 API，覆盖员工的增删改查、批量导入、预览、模板下载、组织架构关联（部门、岗位、上级）、分页查询、条件筛选、权限控制与数据隔离等能力。**最新更新**：系统新增了HTML输入验证功能，在创建和更新员工时会自动验证并拒绝包含HTML标签的名称，有效防止XSS攻击。文档同时给出数据模型、校验规则、错误处理与事务机制说明，帮助前后端开发者快速对接并保证系统安全与一致性。
 
 ## 项目结构
 员工管理功能主要位于后端 FastAPI 路由模块中，并与模型层、模式层、认证授权依赖以及部门/岗位路由协同工作：
@@ -34,6 +43,7 @@
 - 请求/响应模式：`backend/app/schemas.py`
 - 认证与角色依赖：`backend/app/core/security.py`、`backend/app/core/dependencies.py`
 - 部门/岗位路由：`backend/app/routers/departments.py`
+- 安全测试：`backend/tests/test_p7_05_injection_xss.py`
 
 ```mermaid
 graph TB
@@ -42,6 +52,8 @@ RouterEmployees --> Models["数据模型<br/>models.py"]
 RouterEmployees --> Schemas["请求/响应模式<br/>schemas.py"]
 RouterEmployees --> Security["认证与依赖<br/>security.py / dependencies.py"]
 RouterEmployees --> DepartmentsRouter["部门/岗位路由<br/>departments.py"]
+RouterEmployees --> HTMLValidation["HTML输入验证<br/>XSS防护"]
+HTMLValidation --> TestCases["安全测试用例<br/>test_p7_05_injection_xss.py"]
 ```
 
 **图表来源**
@@ -51,6 +63,7 @@ RouterEmployees --> DepartmentsRouter["部门/岗位路由<br/>departments.py"]
 - [backend/app/core/security.py:82-138](file://backend/app/core/security.py#L82-L138)
 - [backend/app/core/dependencies.py:27-50](file://backend/app/core/dependencies.py#L27-L50)
 - [backend/app/routers/departments.py:1-17](file://backend/app/routers/departments.py#L1-L17)
+- [backend/tests/test_p7_05_injection_xss.py:225-244](file://backend/tests/test_p7_05_injection_xss.py#L225-L244)
 
 **章节来源**
 - [backend/app/routers/employees.py:1-32](file://backend/app/routers/employees.py#L1-L32)
@@ -59,16 +72,18 @@ RouterEmployees --> DepartmentsRouter["部门/岗位路由<br/>departments.py"]
 - [backend/app/core/security.py:82-138](file://backend/app/core/security.py#L82-L138)
 - [backend/app/core/dependencies.py:27-50](file://backend/app/core/dependencies.py#L27-L50)
 - [backend/app/routers/departments.py:1-17](file://backend/app/routers/departments.py#L1-L17)
+- [backend/tests/test_p7_05_injection_xss.py:225-244](file://backend/tests/test_p7_05_injection_xss.py#L225-L244)
 
 ## 核心组件
 - 员工路由：提供员工列表、详情、新增、更新、删除、下属查询、协作候选人查询、Excel 模板下载、导入、导入预览、导入状态等接口。
+- **HTML输入验证**：新增的HTML标签检测功能，防止XSS攻击。
 - 数据模型：定义部门、岗位、员工、用户、考核记录等实体及关系。
 - 模式定义：定义员工创建、更新、输出结构，以及通用响应结构。
 - 安全与依赖：JWT 认证、当前用户解析、基于角色的访问控制。
 - 部门/岗位路由：提供部门树、部门 CRUD、岗位 CRUD，支撑员工组织归属。
 
 **章节来源**
-- [backend/app/routers/employees.py:32-663](file://backend/app/routers/employees.py#L32-L663)
+- [backend/app/routers/employees.py:32-679](file://backend/app/routers/employees.py#L32-L679)
 - [backend/app/models.py:8-48](file://backend/app/models.py#L8-L48)
 - [backend/app/schemas.py:74-117](file://backend/app/schemas.py#L74-L117)
 - [backend/app/core/security.py:82-138](file://backend/app/core/security.py#L82-L138)
@@ -79,6 +94,7 @@ RouterEmployees --> DepartmentsRouter["部门/岗位路由<br/>departments.py"]
 员工管理 API 的请求流程如下：
 - 客户端通过 HTTP 调用员工路由接口。
 - 路由层使用依赖注入获取数据库会话和当前用户。
+- **新增HTML输入验证**：对员工姓名进行HTML标签检测，防止XSS攻击。
 - 根据角色进行权限校验和数据隔离过滤。
 - 调用 ORM 操作数据模型，必要时关联部门、岗位、上级员工信息。
 - 返回标准化响应或流式文件（如 Excel）。
@@ -87,10 +103,13 @@ RouterEmployees --> DepartmentsRouter["部门/岗位路由<br/>departments.py"]
 sequenceDiagram
 participant C as "客户端"
 participant R as "员工路由"
+participant V as "HTML验证器"
 participant D as "数据库会话"
 participant M as "数据模型"
 participant S as "安全依赖"
-C->>R : "GET /api/employees?page=1&size=20&keyword=..."
+C->>R : "POST /api/employees {name, employee_no,...}"
+R->>V : "_ensure_name_without_html(name)"
+V-->>R : "验证结果(通过/拒绝)"
 R->>S : "get_current_user()"
 S-->>R : "User对象"
 R->>D : "查询员工(带数据隔离)"
@@ -101,6 +120,9 @@ R-->>C : "分页响应{total,page,size,items}"
 ```
 
 **图表来源**
+- [backend/app/routers/employees.py:32-39](file://backend/app/routers/employees.py#L32-L39)
+- [backend/app/routers/employees.py:496](file://backend/app/routers/employees.py#L496)
+- [backend/app/routers/employees.py:578](file://backend/app/routers/employees.py#L578)
 - [backend/app/routers/employees.py:233-312](file://backend/app/routers/employees.py#L233-L312)
 - [backend/app/core/security.py:82-138](file://backend/app/core/security.py#L82-L138)
 - [backend/app/models.py:31-48](file://backend/app/models.py#L31-L48)
@@ -112,6 +134,7 @@ R-->>C : "分页响应{total,page,size,items}"
 - 角色控制：通过 `require_role("admin","hr",...)` 限制接口访问角色。
 - 统一响应：业务层直接返回字典或 Pydantic 模型；通用包装可使用 `StandardResponse`。
 - 错误码：遵循 FastAPI/HTTP 标准，如 400、401、403、404、409、422、500。
+- **安全验证**：所有员工姓名输入都会经过HTML标签检测，防止XSS攻击。
 
 **章节来源**
 - [backend/app/core/security.py:82-138](file://backend/app/core/security.py#L82-L138)
@@ -198,6 +221,10 @@ BuildResult --> Return["返回分页结果"]
 - 路径：`POST /api/employees`
 - 权限：admin/hr
 - 请求体：使用 `EmployeeCreate` 模式，必填字段包括工号和姓名，可选字段包括部门、岗位、上级、部门负责人标记、状态。
+- **新增HTML验证**：
+  - 自动检测姓名中的HTML标签
+  - 如果检测到HTML标签，返回400错误："员工姓名不能包含 HTML 标签"
+  - 使用正则表达式 `<[^>]*>` 匹配所有HTML标签
 - 校验：
   - 工号唯一性
   - 部门/岗位外键存在性
@@ -209,9 +236,15 @@ BuildResult --> Return["返回分页结果"]
 sequenceDiagram
 participant C as "客户端"
 participant R as "员工路由"
+participant V as "HTML验证器"
 participant DB as "数据库"
 participant L as "操作日志"
 C->>R : "POST /api/employees {employee_no,name,...}"
+R->>V : "_ensure_name_without_html(name)"
+V-->>R : "验证通过/拒绝"
+alt HTML标签检测失败
+R-->>C : "400 错误 : 员工姓名不能包含 HTML 标签"
+else HTML标签检测通过
 R->>DB : "校验工号唯一性/部门/岗位存在"
 DB-->>R : "校验结果"
 R->>DB : "创建Employee并提交"
@@ -219,9 +252,12 @@ DB-->>R : "成功"
 R->>L : "log_operation(create_employee)"
 L-->>R : "完成"
 R-->>C : "返回员工信息"
+end
 ```
 
 **图表来源**
+- [backend/app/routers/employees.py:32-39](file://backend/app/routers/employees.py#L32-L39)
+- [backend/app/routers/employees.py:496](file://backend/app/routers/employees.py#L496)
 - [backend/app/routers/employees.py:480-551](file://backend/app/routers/employees.py#L480-L551)
 - [backend/app/schemas.py:74-83](file://backend/app/schemas.py#L74-L83)
 
@@ -233,6 +269,9 @@ R-->>C : "返回员工信息"
 - 路径：`PUT /api/employees/{employee_id}`
 - 权限：admin/hr
 - 请求体：使用 `EmployeeUpdate` 模式，支持部分字段更新。
+- **新增HTML验证**：
+  - 同样对更新的姓名进行HTML标签检测
+  - 防止通过更新接口绕过安全检查
 - 校验：
   - 工号唯一性（排除自身）
   - 部门外键存在性
@@ -254,6 +293,57 @@ R-->>C : "返回员工信息"
 **章节来源**
 - [backend/app/routers/employees.py:632-662](file://backend/app/routers/employees.py#L632-L662)
 
+## 数据安全与输入验证
+
+### HTML输入验证机制
+**新增功能**：系统实现了全面的HTML输入验证，专门针对员工姓名字段进行XSS攻击防护。
+
+#### 验证实现
+- **正则表达式模式**：`<[^>]*>` 用于匹配所有HTML标签
+- **验证函数**：`_ensure_name_without_html()` 在创建和更新员工时调用
+- **错误处理**：检测到HTML标签时返回400状态码和明确的错误消息
+
+#### 安全防护策略
+- **输入拦截**：在数据入库前进行严格验证
+- **拒绝策略**：发现HTML标签直接拒绝请求，不进行任何处理
+- **统一错误消息**：返回"员工姓名不能包含 HTML 标签"的错误提示
+
+```mermaid
+flowchart TD
+Input["接收员工姓名输入"] --> RegexMatch{"匹配HTML标签?"}
+RegexMatch --> |是| Reject["返回400错误<br/>'员工姓名不能包含 HTML 标签'"]
+RegexMatch --> |否| Process["继续正常业务流程"]
+Reject --> Log["记录安全事件"]
+Process --> Validate["其他字段验证"]
+Validate --> Save["保存到数据库"]
+```
+
+**图表来源**
+- [backend/app/routers/employees.py:29-39](file://backend/app/routers/employees.py#L29-L39)
+- [backend/app/routers/employees.py:496](file://backend/app/routers/employees.py#L496)
+- [backend/app/routers/employees.py:578](file://backend/app/routers/employees.py#L578)
+
+#### 测试覆盖
+系统包含完整的安全测试用例，验证以下场景：
+- XSS脚本注入防护
+- 各种HTML标签检测
+- SQL注入防护
+- 边界情况处理
+
+**章节来源**
+- [backend/app/routers/employees.py:29-39](file://backend/app/routers/employees.py#L29-L39)
+- [backend/tests/test_p7_05_injection_xss.py:225-244](file://backend/tests/test_p7_05_injection_xss.py#L225-L244)
+
+### 其他安全措施
+- **SQL注入防护**：使用参数化查询，避免SQL注入攻击
+- **权限控制**：严格的基于角色的访问控制
+- **数据隔离**：不同角色只能访问授权范围内的数据
+- **审计日志**：记录所有关键操作
+
+**章节来源**
+- [backend/app/routers/employees.py:233-312](file://backend/app/routers/employees.py#L233-L312)
+- [backend/app/core/security.py:82-138](file://backend/app/core/security.py#L82-L138)
+
 ## 数据模型与字段定义
 
 ### 员工模型
@@ -261,7 +351,7 @@ R-->>C : "返回员工信息"
 - 关键字段：
   - id：主键
   - employee_no：工号，唯一且必填
-  - name：姓名，必填
+  - name：姓名，必填，**新增HTML验证**
   - department_id：部门外键
   - position_id：岗位外键
   - manager_id：上级员工外键（自引用）
@@ -274,8 +364,6 @@ R-->>C : "返回员工信息"
   - 上级：manager
   - 下属：subordinates
   - 用户：user（一对一）
-
-> 本图为局部关系片段，完整实体关系与约束以 [ER图设计.md](../系统架构/数据库架构设计/ER图设计.md) 为唯一权威来源。
 
 ```mermaid
 erDiagram
@@ -381,7 +469,7 @@ USERS ||--|| EMPLOYEES : "employee_id"
 - 依赖：openpyxl（未安装时返回 500）。
 
 **章节来源**
-- [backend/app/routers/employees.py:35-65](file://backend/app/routers/employees.py#L35-L65)
+- [backend/app/routers/employees.py:41-71](file://backend/app/routers/employees.py#L41-L71)
 
 ### 导入预览
 - 路径：`POST /api/employees/import-preview`
@@ -390,7 +478,7 @@ USERS ||--|| EMPLOYEES : "employee_id"
 - 依赖：openpyxl。
 
 **章节来源**
-- [backend/app/routers/employees.py:202-225](file://backend/app/routers/employees.py#L202-L225)
+- [backend/app/routers/employees.py:208-231](file://backend/app/routers/employees.py#L208-L231)
 
 ### 导入状态
 - 路径：`GET /api/employees/import/status`
@@ -398,7 +486,7 @@ USERS ||--|| EMPLOYEES : "employee_id"
 - 行为：返回就绪状态与进度（当前固定返回 ready 与 100%）。
 
 **章节来源**
-- [backend/app/routers/employees.py:228-230](file://backend/app/routers/employees.py#L228-L230)
+- [backend/app/routers/employees.py:234-236](file://backend/app/routers/employees.py#L234-L236)
 
 ### 批量导入
 - 路径：`POST /api/employees/import`
@@ -440,13 +528,13 @@ Commit --> Return["返回导入结果"]
 ```
 
 **图表来源**
-- [backend/app/routers/employees.py:68-199](file://backend/app/routers/employees.py#L68-L199)
+- [backend/app/routers/employees.py:74-205](file://backend/app/routers/employees.py#L74-L205)
 
 **章节来源**
-- [backend/app/routers/employees.py:68-199](file://backend/app/routers/employees.py#L68-L199)
+- [backend/app/routers/employees.py:74-205](file://backend/app/routers/employees.py#L74-L205)
 
 ### 数据导出
-- 当前员工路由未提供统一的“导出员工列表”接口。
+- 当前员工路由未提供统一的"导出员工列表"接口。
 - 前端测试中存在报表导出页面，但具体导出逻辑不在员工路由中体现。
 - 如需扩展，可在员工路由增加导出接口，复用现有筛选与数据隔离逻辑，并以流式方式返回 Excel/PDF。
 
@@ -461,6 +549,8 @@ EmployeesRouter --> Schemas["schemas.py"]
 EmployeesRouter --> Security["security.py"]
 EmployeesRouter --> Dependencies["dependencies.py"]
 EmployeesRouter --> DepartmentsRouter["departments.py"]
+EmployeesRouter --> HTMLValidation["HTML输入验证"]
+HTMLValidation --> TestCases["安全测试用例"]
 ```
 
 **图表来源**
@@ -470,6 +560,7 @@ EmployeesRouter --> DepartmentsRouter["departments.py"]
 - [backend/app/core/security.py:82-138](file://backend/app/core/security.py#L82-L138)
 - [backend/app/core/dependencies.py:27-50](file://backend/app/core/dependencies.py#L27-L50)
 - [backend/app/routers/departments.py:1-17](file://backend/app/routers/departments.py#L1-L17)
+- [backend/tests/test_p7_05_injection_xss.py:225-244](file://backend/tests/test_p7_05_injection_xss.py#L225-L244)
 
 **章节来源**
 - [backend/app/routers/employees.py:1-32](file://backend/app/routers/employees.py#L1-L32)
@@ -478,6 +569,7 @@ EmployeesRouter --> DepartmentsRouter["departments.py"]
 - [backend/app/core/security.py:82-138](file://backend/app/core/security.py#L82-L138)
 - [backend/app/core/dependencies.py:27-50](file://backend/app/core/dependencies.py#L27-L50)
 - [backend/app/routers/departments.py:1-17](file://backend/app/routers/departments.py#L1-L17)
+- [backend/tests/test_p7_05_injection_xss.py:225-244](file://backend/tests/test_p7_05_injection_xss.py#L225-L244)
 
 ## 性能与事务
 - 列表查询：
@@ -489,6 +581,9 @@ EmployeesRouter --> DepartmentsRouter["departments.py"]
   - 文件内重复工号提前拦截。
   - 部门/岗位按需创建或查找，减少冗余写入。
   - 最终统一提交事务，确保导入原子性。
+- **HTML验证性能**：
+  - 正则表达式匹配开销极小，对性能影响可忽略不计。
+  - 验证在数据入库前进行，避免无效数据浪费数据库资源。
 - 建议优化：
   - 对 employees.employee_no、employees.department_id、employees.position_id、employees.manager_id 建立索引以提升查询效率。
   - 对 departments.parent_id 建立索引以加速部门树遍历。
@@ -510,6 +605,9 @@ EmployeesRouter --> DepartmentsRouter["departments.py"]
   - 删除员工时存在考核历史数据。
 - 422 不可处理：
   - 部门/岗位外键不存在。
+- **400 HTML验证错误**：
+  - 员工姓名包含HTML标签，如 `<script>alert('xss')</script>`
+  - 解决方案：移除所有HTML标签，只保留纯文本姓名
 - 500 内部错误：
   - openpyxl 未安装导致模板下载/导入失败。
 
@@ -518,7 +616,14 @@ EmployeesRouter --> DepartmentsRouter["departments.py"]
 - [backend/app/routers/employees.py:480-551](file://backend/app/routers/employees.py#L480-L551)
 - [backend/app/routers/employees.py:554-629](file://backend/app/routers/employees.py#L554-L629)
 - [backend/app/routers/employees.py:632-662](file://backend/app/routers/employees.py#L632-L662)
-- [backend/app/routers/employees.py:35-65](file://backend/app/routers/employees.py#L35-L65)
+- [backend/app/routers/employees.py:41-71](file://backend/app/routers/employees.py#L41-L71)
+- [backend/app/routers/employees.py:32-39](file://backend/app/routers/employees.py#L32-L39)
 
 ## 结论
-员工管理 API 提供了完整的 CRUD、批量导入、预览与模板下载能力，并通过角色依赖与数据隔离保障不同角色的访问边界。部门与岗位的关联通过外键与路由协同实现，支持灵活的组织架构管理。建议在后续版本中补充统一的员工导出接口，并对关键查询字段建立索引以提升性能。对于大规模导入，可引入异步任务与分批提交机制，增强系统的稳定性与可扩展性。
+员工管理 API 提供了完整的 CRUD、批量导入、预览与模板下载能力，并通过角色依赖与数据隔离保障不同角色的访问边界。**最新版本**增加了全面的HTML输入验证机制，有效防止XSS攻击，提升了系统的安全性。部门与岗位的关联通过外键与路由协同实现，支持灵活的组织架构管理。建议在后续版本中补充统一的员工导出接口，并对关键查询字段建立索引以提升性能。对于大规模导入，可引入异步任务与分批提交机制，增强系统的稳定性与可扩展性。
+
+**安全改进总结**：
+- 实现了全面的HTML输入验证，防止XSS攻击
+- 添加了完整的安全测试用例覆盖
+- 保持了向后兼容性，不影响现有功能
+- 提供了清晰的错误提示信息，便于前端处理

@@ -185,8 +185,6 @@ AuthCore <.. SecurityCore : "职责相似但实现位置不同"
 - 密码以bcrypt哈希值存储，避免明文泄露风险
 - is_first_login用于强制首次登录改密策略
 
-> 本图为局部关系片段，完整实体关系与约束以 [ER图设计.md](../系统架构/数据库架构设计/ER图设计.md) 为唯一权威来源。
-
 ```mermaid
 erDiagram
 USER {

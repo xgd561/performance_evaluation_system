@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: master
 nodes_managed: true
-exported_at: "2026-11-22T06:47:05Z"
+exported_at: "2026-11-22T11:47:06Z"
 modules:
     "":
-        dir_name: 绩效考核评分系统根装配层
-        title: 绩效考核评分系统根装配层
+        dir_name: 绩效考核评分系统根编排层
+        title: 绩效考核评分系统根编排层
         scope:
             - main.py
             - bak.md
@@ -25,8 +25,8 @@ modules:
         depends_on: []
         related_to: []
     backend_service:
-        dir_name: 绩效考核评分系统后端服务
-        title: 绩效考核评分系统后端服务
+        dir_name: 绩效考核后端服务（FastAPI 单体应用）
+        title: 绩效考核后端服务（FastAPI 单体应用）
         scope:
             - backend/
         source_files: []
@@ -39,8 +39,8 @@ modules:
         depends_on: []
         related_to: []
     backend_service/application_core:
-        dir_name: 应用核心：FastAPI 应用装配与领域模型
-        title: 应用核心：FastAPI 应用装配与领域模型
+        dir_name: FastAPI 应用装配与领域数据层
+        title: FastAPI 应用装配与领域数据层
         scope:
             - backend/app/main.py
             - backend/app/database.py
@@ -78,8 +78,8 @@ modules:
         related_to:
             - path: frontend_app
     backend_service/reporting_dashboard:
-        dir_name: 报表与仪表盘聚合接口
-        title: 报表与仪表盘聚合接口
+        dir_name: 绩效仪表盘与报表导出路由
+        title: 绩效仪表盘与报表导出路由
         scope:
             - backend/app/routers/dashboard.py
             - backend/app/routers/reports.py
@@ -90,8 +90,8 @@ modules:
         related_to:
             - path: frontend_app
     backend_service/system_services:
-        dir_name: 系统配置、通知与健康检查路由
-        title: 系统配置、通知与健康检查路由
+        dir_name: 系统配置与通知路由层
+        title: 系统配置与通知路由层
         scope:
             - backend/app/routers/config.py
             - backend/app/routers/notifications.py
@@ -102,8 +102,8 @@ modules:
         related_to:
             - path: frontend_app
     docs_and_prd:
-        dir_name: 绩效考核评分系统项目文档与 PRD
-        title: 绩效考核评分系统项目文档与 PRD
+        dir_name: 绩效考核评分系统项目文档集
+        title: 绩效考核评分系统项目文档集
         scope:
             - docs/
         source_files: []
@@ -111,8 +111,8 @@ modules:
         depends_on: []
         related_to: []
     frontend_app:
-        dir_name: 绩效考核系统前端 SPA
-        title: 绩效考核系统前端 SPA
+        dir_name: 绩效考核前端 SPA（Vue3 + Vite）
+        title: 绩效考核前端 SPA（Vue3 + Vite）
         scope:
             - frontend/
         source_files: []

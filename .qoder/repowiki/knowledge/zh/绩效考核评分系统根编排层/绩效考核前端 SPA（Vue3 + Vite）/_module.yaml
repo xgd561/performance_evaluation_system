@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: frontend_app
+title: 绩效考核前端 SPA（Vue3 + Vite）
+scope:
+    - frontend/
+source_files: []
+depends_on: []
+related_to:
+    - path: backend_service/application_core
+    - path: backend_service/approvals_and_appeals
+    - path: backend_service/performance_cycles
+    - path: backend_service/reporting_dashboard
+    - path: backend_service/system_services

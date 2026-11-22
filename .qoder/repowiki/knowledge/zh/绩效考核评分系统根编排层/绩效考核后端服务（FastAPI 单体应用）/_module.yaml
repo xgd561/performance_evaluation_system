@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: backend_service
+title: 绩效考核后端服务（FastAPI 单体应用）
+scope:
+    - backend/
+source_files: []
+depends_on: []
+related_to: []

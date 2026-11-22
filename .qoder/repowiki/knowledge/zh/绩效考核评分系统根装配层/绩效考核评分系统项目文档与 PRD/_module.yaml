@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: docs_and_prd
-title: 绩效考核评分系统项目文档与 PRD
-scope:
-    - docs/
-source_files: []
-depends_on: []
-related_to: []

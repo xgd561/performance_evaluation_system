@@ -7,8 +7,16 @@
 - [backend/app/schemas.py](file://backend/app/schemas.py)
 - [backend/app/utils/workflow_state_machine.py](file://backend/app/utils/workflow_state_machine.py)
 - [backend/app/services/notification_service.py](file://backend/app/services/notification_service.py)
+- [backend/app/services/config_service.py](file://backend/app/services/config_service.py)
+- [backend/tests/test_cycle_default_weights.py](file://backend/tests/test_cycle_default_weights.py)
 - [docs/TECH_绩效考核评分系统_v1.0.md](file://docs/TECH_绩效考核评分系统_v1.0.md)
 </cite>
+
+## 更新摘要
+**变更内容**   
+- POST /cycles接口的weights字段变为可选参数，当未提供时后端自动从config_service获取默认值
+- 新增了详细的权重默认值说明，包括维度权重和评分人权重的全局配置机制
+- 更新了创建周期的参数说明，明确weights字段的可选性和默认值处理逻辑
 
 ## 目录
 1. [引言](#引言)
@@ -23,11 +31,7 @@
 10. [附录：接口清单与参数说明](#附录接口清单与参数说明)
 
 ## 引言
-本文件面向“考核周期”相关 API，覆盖创建、启动、取消、结束（发布、归档、解冻）等生命周期管理接口；详细说明状态机驱动的流程控制、阶段业务规则与约束条件；包含参与者管理、进度监控、自动提醒等功能接口；提供考核周期配置的详细参数说明（评分权重、时间设置、参与范围等）；明确状态转换规则与限制，确保业务流程正确；并给出周期数据的统计分析与报表生成接口。
-
-> **路径约定**：为便于阅读，下文接口路径统一简写为 `/cycles/...`；实际完整前缀由 `main.py` 挂载决定（`api_v1.include_router(cycles.router, prefix="/assessment-cycles")`），即真实路径为 `/api/v1/assessment-cycles/...`。新代码与测试请使用 `/api/v1` 前缀，旧的无前缀 `/api/...` 写法已废弃。
->
-> **权重口径**：维度权重与评分人权重默认值**唯一来源**为 `app/services/config_service.py`（见下文“考核周期配置参数说明”），路由层、前端与模型列默认值均不再各自定义。
+本文件面向"考核周期"相关 API，覆盖创建、启动、暂停（取消）、结束（发布、归档、解冻）等生命周期管理接口；详细说明状态机驱动的流程控制、阶段业务规则与约束条件；包含参与者管理、进度监控、自动提醒等功能接口；提供考核周期配置的详细参数说明（评分权重、时间设置、参与范围等）；明确状态转换规则与限制，确保业务流程正确；并给出周期数据的统计分析与报表生成接口。
 
 ## 项目结构
 围绕考核周期的后端实现主要位于以下模块：
@@ -36,7 +40,8 @@
 - 请求/响应模式：`backend/app/schemas.py`
 - 状态机工具：`backend/app/utils/workflow_state_machine.py`
 - 通知服务：`backend/app/services/notification_service.py`
-- 技术文档参考：`docs/TECH_绩效考核评分系统_v1.0.md`
+- 配置服务：`backend/app/services/config_service.py`
+- 技术文档参考：`docs/TEECH_绩效考核评分系统_v1.0.md`
 
 ```mermaid
 graph TB
@@ -45,6 +50,7 @@ Router --> Models["数据模型<br/>models.py"]
 Router --> Schemas["请求/响应模式<br/>schemas.py"]
 Router --> StateMachine["工作流状态机<br/>workflow_state_machine.py"]
 Router --> Notification["通知服务<br/>notification_service.py"]
+Router --> ConfigService["配置服务<br/>config_service.py"]
 Router --> DB["数据库会话"]
 ```
 
@@ -54,6 +60,7 @@ Router --> DB["数据库会话"]
 - [backend/app/schemas.py:208-323](file://backend/app/schemas.py#L208-L323)
 - [backend/app/utils/workflow_state_machine.py:10-78](file://backend/app/utils/workflow_state_machine.py#L10-L78)
 - [backend/app/services/notification_service.py:5-17](file://backend/app/services/notification_service.py#L5-L17)
+- [backend/app/services/config_service.py:1-100](file://backend/app/services/config_service.py#L1-L100)
 
 **章节来源**
 - [backend/app/routers/cycles.py:1-33](file://backend/app/routers/cycles.py#L1-L33)
@@ -66,12 +73,14 @@ Router --> DB["数据库会话"]
 - 周期-员工关系：`CycleEmployee`，表示某员工被纳入某考核周期及其加入状态。
 - 状态机：`WorkflowStateMachine`，定义完整状态集合与转换规则，支持条件转换、额外校验注册、操作日志记录。
 - 通知服务：`NotificationService`，用于在关键节点创建站内通知。
+- 配置服务：`ConfigService`，提供全局配置默认值，包括维度权重、评分人权重、等级规则等。
 
 **章节来源**
 - [backend/app/models.py:62-129](file://backend/app/models.py#L62-L129)
 - [backend/app/models.py:167-174](file://backend/app/models.py#L167-L174)
 - [backend/app/utils/workflow_state_machine.py:10-78](file://backend/app/utils/workflow_state_machine.py#L10-L78)
 - [backend/app/services/notification_service.py:5-17](file://backend/app/services/notification_service.py#L5-L17)
+- [backend/app/services/config_service.py:41-100](file://backend/app/services/config_service.py#L41-L100)
 
 ## 架构总览
 考核周期的生命周期由路由层协调，结合状态机进行强约束的状态流转，并在关键节点触发通知与审计日志。
@@ -81,10 +90,13 @@ sequenceDiagram
 participant Admin as "管理员/HR"
 participant Router as "cycles.py 路由"
 participant SM as "WorkflowStateMachine"
+participant ConfigSvc as "ConfigService"
 participant DB as "数据库"
 participant Notify as "通知服务"
 Admin->>Router : POST /cycles/launch 或 POST /{cycle_id}/start
 Router->>DB : 校验周期与员工
+Router->>ConfigSvc : 获取默认权重配置
+ConfigSvc-->>Router : 返回维度权重和评分人权重
 Router->>SM : transition(current_state, action="start_cycle")
 SM-->>Router : 目标状态 pending_self
 Router->>DB : 更新周期状态为 pending_self
@@ -97,6 +109,7 @@ Router-->>Admin : 返回已创建记录数与新状态
 - [backend/app/routers/cycles.py:385-465](file://backend/app/routers/cycles.py#L385-L465)
 - [backend/app/utils/workflow_state_machine.py:39-42](file://backend/app/utils/workflow_state_machine.py#L39-L42)
 - [backend/app/services/notification_service.py:5-17](file://backend/app/services/notification_service.py#L5-L17)
+- [backend/app/services/config_service.py:55-81](file://backend/app/services/config_service.py#L55-L81)
 
 ## 详细组件分析
 
@@ -109,19 +122,22 @@ Router-->>Admin : 返回已创建记录数与新状态
   - 规范化等级规则，兼容简单值与区间对象。
   - 校验名称唯一性。
   - 默认状态为 `not_started`。
-  - 权重不在此处硬编码：维度权重直接取 `config_service.get_dimension_weights(db)`（业绩 60 / 能力 20 / 态度 20，接口不可覆盖）；评分人权重取 `req.weights` 或 `config_service.get_reviewer_weights(db)` 的全局默认值。
-  - 写入等级规则、小部门豁免、协作评开关等配置。
+  - **新增**：当未提供weights参数时，自动从config_service获取默认权重配置。
+  - 写入维度权重、评分人权重、等级规则、小部门豁免、协作评开关等配置。
 - 输入参数（来自 `AssessmentCycleCreate`）：
   - name、type、start_date、end_date
   - self_due_date、manager_due_date、peer_due_date
-  - weights（**可选**，评分人权重；扁平 `{self, manager, peer}`，三者之和必须为 100。不传即用全局默认值：业绩 30/70/0、能力 20/60/20、态度 10/50/40）
+  - **weights（可选）**：维度权重，总和必须为 100。如未提供则使用全局默认值。
   - grade_rules（等级规则，支持简单值或区间对象）
   - small_dept_exemption、peer_review_enabled、department_ids（可选）
 - 输出字段：id、name、type、起止时间、各阶段截止时间、status、weights、grade_rules、peer_review_enabled、created_at。
 
+**更新** weights字段现在为可选参数，当未提供时后端会自动调用config_service.get_dimension_weights()和config_service.get_reviewer_weights()来获取默认权重配置。
+
 **章节来源**
-- [backend/app/routers/cycles.py:159-222](file://backend/app/routers/cycles.py#L159-L222)
-- [backend/app/schemas.py:208-283](file://backend/app/schemas.py#L208-L283)
+- [backend/app/routers/cycles.py:160-227](file://backend/app/routers/cycles.py#L160-L227)
+- [backend/app/schemas.py:215-228](file://backend/app/schemas.py#L215-L228)
+- [backend/app/services/config_service.py:55-81](file://backend/app/services/config_service.py#L55-L81)
 
 #### 2) 查询与筛选周期列表
 - 接口：`GET /cycles`
@@ -129,14 +145,14 @@ Router-->>Admin : 返回已创建记录数与新状态
 - 返回项包含周期基本信息、权重、等级规则、开关标志及创建时间。
 
 **章节来源**
-- [backend/app/routers/cycles.py:49-114](file://backend/app/routers/cycles.py#L49-L114)
+- [backend/app/routers/cycles.py:50-115](file://backend/app/routers/cycles.py#L50-L115)
 
 #### 3) 获取周期详情
 - 接口：`GET /cycles/{cycle_id}`
 - 能力：返回周期详情，并附带参与员工的部门列表。
 
 **章节来源**
-- [backend/app/routers/cycles.py:117-156](file://backend/app/routers/cycles.py#L117-L156)
+- [backend/app/routers/cycles.py:118-157](file://backend/app/routers/cycles.py#L118-L157)
 
 #### 4) 修改周期配置
 - 接口：`PUT /cycles/{cycle_id}`
@@ -145,7 +161,7 @@ Router-->>Admin : 返回已创建记录数与新状态
 - 可更新字段：name、type、日期、weights、grade_rules、small_dept_exemption、peer_review_enabled。
 
 **章节来源**
-- [backend/app/routers/cycles.py:225-279](file://backend/app/routers/cycles.py#L225-L279)
+- [backend/app/routers/cycles.py:230-284](file://backend/app/routers/cycles.py#L230-L284)
 
 #### 5) 删除周期
 - 接口：`DELETE /cycles/{cycle_id}`
@@ -153,7 +169,7 @@ Router-->>Admin : 返回已创建记录数与新状态
 - 约束：仅 `not_started` 且无考核记录的周期可删除。
 
 **章节来源**
-- [backend/app/routers/cycles.py:282-304](file://backend/app/routers/cycles.py#L282-L304)
+- [backend/app/routers/cycles.py:287-309](file://backend/app/routers/cycles.py#L287-L309)
 
 #### 6) 启动考核周期（两种风格）
 - 接口A：`POST /cycles/launch`
@@ -185,22 +201,21 @@ LogOp --> End(["返回 created_records 与状态"])
 ```
 
 **图表来源**
-- [backend/app/routers/cycles.py:307-382](file://backend/app/routers/cycles.py#L307-L382)
-- [backend/app/routers/cycles.py:385-465](file://backend/app/routers/cycles.py#L385-L465)
+- [backend/app/routers/cycles.py:312-387](file://backend/app/routers/cycles.py#L312-L387)
+- [backend/app/routers/cycles.py:390-470](file://backend/app/routers/cycles.py#L390-L470)
 - [backend/app/utils/workflow_state_machine.py:39-42](file://backend/app/utils/workflow_state_machine.py#L39-L42)
 
 **章节来源**
-- [backend/app/routers/cycles.py:307-465](file://backend/app/routers/cycles.py#L307-L465)
+- [backend/app/routers/cycles.py:312-470](file://backend/app/routers/cycles.py#L312-L470)
 - [backend/app/utils/workflow_state_machine.py:39-42](file://backend/app/utils/workflow_state_machine.py#L39-L42)
 
-#### 7) 取消考核周期
+#### 7) 暂停（取消）考核周期
 - 接口：`POST /{cycle_id}/cancel`
 - 权限：admin/hr
 - 行为：将周期状态置为 `cancelled`，并将该周期下所有考核记录状态置为 `cancelled`。
-- 说明：**没有独立的“暂停”接口**，`cancelled` 为终态，取消后不可恢复；需要中断流程请走此接口并在业务侧另行处理。
 
 **章节来源**
-- [backend/app/routers/cycles.py:712-736](file://backend/app/routers/cycles.py#L712-L736)
+- [backend/app/routers/cycles.py:717-741](file://backend/app/routers/cycles.py#L717-L741)
 
 #### 8) 发布考核结果
 - 接口：`POST /{cycle_id}/publish`
@@ -224,8 +239,7 @@ LogOp --> End(["返回 created_records 与状态"])
   - 行为：周期状态恢复为 `published`，解锁周期与记录。
 
 **章节来源**
-- [backend/app/routers/cycles.py:739-794](file://backend/app/routers/cycles.py#L739-L794)
-- [backend/app/routers/cycles.py:797-831](file://backend/app/routers/cycles.py#L797-L831)
+- [backend/app/routers/cycles.py:744-831](file://backend/app/routers/cycles.py#L744-L831)
 
 #### 10) 测试辅助推进状态
 - 接口：`POST /{cycle_id}/advance-to-approval`
@@ -299,9 +313,9 @@ appealed --> published : "resolve"
   - 返回员工编号、姓名、部门、岗位、状态、加入时间等。
 
 **章节来源**
-- [backend/app/routers/cycles.py:468-510](file://backend/app/routers/cycles.py#L468-L510)
-- [backend/app/routers/cycles.py:513-527](file://backend/app/routers/cycles.py#L513-L527)
-- [backend/app/routers/cycles.py:530-566](file://backend/app/routers/cycles.py#L530-L566)
+- [backend/app/routers/cycles.py:473-515](file://backend/app/routers/cycles.py#L473-L515)
+- [backend/app/routers/cycles.py:518-532](file://backend/app/routers/cycles.py#L518-L532)
+- [backend/app/routers/cycles.py:535-571](file://backend/app/routers/cycles.py#L535-L571)
 
 #### 进度监控
 - 接口：`GET /{cycle_id}/progress`
@@ -324,37 +338,52 @@ IncompleteList --> PEnd(["返回进度详情"])
 ```
 
 **图表来源**
-- [backend/app/routers/cycles.py:569-709](file://backend/app/routers/cycles.py#L569-L709)
+- [backend/app/routers/cycles.py:574-714](file://backend/app/routers/cycles.py#L574-L714)
 
 **章节来源**
-- [backend/app/routers/cycles.py:569-709](file://backend/app/routers/cycles.py#L569-L709)
+- [backend/app/routers/cycles.py:574-714](file://backend/app/routers/cycles.py#L574-L714)
 
 ### 自动提醒与通知
 - 在周期启动时，为参与员工创建通知，提示尽快完成自评。
 - 通知服务提供创建、查询、标记已读等方法。
 
 **章节来源**
-- [backend/app/routers/cycles.py:360-370](file://backend/app/routers/cycles.py#L360-L370)
-- [backend/app/routers/cycles.py:443-453](file://backend/app/routers/cycles.py#L443-L453)
+- [backend/app/routers/cycles.py:365-375](file://backend/app/routers/cycles.py#L365-L375)
+- [backend/app/routers/cycles.py:448-458](file://backend/app/routers/cycles.py#L448-L458)
 - [backend/app/services/notification_service.py:5-17](file://backend/app/services/notification_service.py#L5-L17)
 
 ### 考核周期配置参数说明
 
 #### 维度权重与评分人权重
+- **维度权重（`weights`）**：业绩、能力、态度的权重之和必须为 100。**新增**：此字段现在是可选的，当未提供时自动从config_service获取默认值。
+- **评分人权重（`reviewer_weights`）**：每个维度下自评、上级、协作的权重之和必须为 100。
 
-两者的默认值**唯一来源**为 `app/services/config_service.py`，创建周期时写入的是配置快照，之后单独调整配置不会回改已有周期。
+**更新** 维度权重现在支持两种处理方式：
+1. 显式提供：客户端在请求中传入weights字段，总和必须为100
+2. 使用默认值：不传weights字段时，系统自动从config_service获取全局默认配置
 
-- 维度权重（`dimension_weights`）：业绩 60 / 能力 20 / 态度 20（`config_service.get_dimension_weights` 的默认值，返回整数百分比）。**接口不提供覆盖入口**，`POST /cycles` 始终取该默认值。
-- 评分人权重（`reviewer_weights`）：按维度差异化，每个维度下自评 + 上级 + 协作 = 100：
+#### 权重默认值机制
+系统通过config_service提供全局权重默认值：
 
-| 维度 | 自评 self | 上级 manager | 协作 peer |
-| --- | --- | --- | --- |
-| 业绩 performance | 30 | 70 | 0 |
-| 能力 ability | 20 | 60 | 20 |
-| 态度 attitude | 10 | 50 | 40 |
+- **维度权重默认值**：
+  ```json
+  {
+    "performance": 60,
+    "ability": 20, 
+    "attitude": 20
+  }
+  ```
 
-- 注意语义：请求体里的字段名是 `weights`，实际被当作**评分人权重**写入 `reviewer_weights` 列；当前只接受扁平结构 `{self, manager, peer}`（对所有维度生效），传按维度嵌套的结构会被 Schema 的求和校验拒绝——这是已记录的语义缺口，历史用例中也存在把 `{performance, ability, attitude}` 维度权重塞进 `weights` 的情况。
-- 前端（`CycleList.vue`）已不再传 `weights`，交由后端取全局默认值。
+- **评分人权重默认值**：
+  ```json
+  {
+    "performance": {"self": 30, "manager": 70, "peer": 0},
+    "ability": {"self": 20, "manager": 60, "peer": 20},
+    "attitude": {"self": 10, "manager": 50, "peer": 40}
+  }
+  ```
+
+这些默认值存储在SystemConfig表中，支持动态配置和管理。
 
 #### 等级规则（`grade_rules`）
 - 支持简单值（如 A=90）或区间对象（如 A={min:90,max:100,ratio_limit:0.2}）。
@@ -375,9 +404,10 @@ IncompleteList --> PEnd(["返回进度详情"])
 - peer_review_enabled：协作评开关，影响状态机从上级评到协作评或汇总的分支。
 
 **章节来源**
-- [backend/app/schemas.py:208-283](file://backend/app/schemas.py#L208-L283)
+- [backend/app/schemas.py:215-228](file://backend/app/schemas.py#L215-L228)
 - [backend/app/schemas.py:405-458](file://backend/app/schemas.py#L405-L458)
 - [backend/app/models.py:62-83](file://backend/app/models.py#L62-L83)
+- [backend/app/services/config_service.py:55-81](file://backend/app/services/config_service.py#L55-L81)
 
 ### 统计分析、报表与导出
 
@@ -395,7 +425,7 @@ IncompleteList --> PEnd(["返回进度详情"])
 - 等级分布、强制调整人员清单、历史趋势、PDF 档案等接口见技术文档。
 
 **章节来源**
-- [backend/app/routers/cycles.py:569-709](file://backend/app/routers/cycles.py#L569-L709)
+- [backend/app/routers/cycles.py:574-714](file://backend/app/routers/cycles.py#L574-L714)
 - [backend/app/routers/cycles.py:834-925](file://backend/app/routers/cycles.py#L834-L925)
 - [docs/TECH_绩效考核评分系统_v1.0.md:1033-1040](file://docs/TECH_绩效考核评分系统_v1.0.md#L1033-L1040)
 
@@ -479,6 +509,12 @@ class NotificationService {
 +list_user_notifications(db, user_id, unread_only)
 +mark_notification_read(db, notification_id, user_id)
 }
+class ConfigService {
++get_dimension_weights(db)
++get_reviewer_weights(db)
++get_grade_rules(db)
++clear_config_cache()
+}
 AssessmentCycle "1" -- "n" AssessmentRecord : "包含"
 AssessmentCycle "1" -- "n" CycleEmployee : "包含"
 AssessmentRecord --> Employee : "关联"
@@ -486,6 +522,7 @@ AssessmentRecord --> Department : "关联"
 AssessmentRecord --> Position : "关联"
 WorkflowStateMachine ..> AssessmentRecord : "驱动状态"
 NotificationService ..> AssessmentCycle : "通知触发"
+ConfigService ..> AssessmentCycle : "提供默认权重"
 ```
 
 **图表来源**
@@ -493,23 +530,25 @@ NotificationService ..> AssessmentCycle : "通知触发"
 - [backend/app/models.py:167-174](file://backend/app/models.py#L167-L174)
 - [backend/app/utils/workflow_state_machine.py:10-78](file://backend/app/utils/workflow_state_machine.py#L10-L78)
 - [backend/app/services/notification_service.py:5-17](file://backend/app/services/notification_service.py#L5-L17)
+- [backend/app/services/config_service.py:41-100](file://backend/app/services/config_service.py#L41-L100)
 
 **章节来源**
 - [backend/app/models.py:62-129](file://backend/app/models.py#L62-L129)
 - [backend/app/models.py:167-174](file://backend/app/models.py#L167-L174)
 - [backend/app/utils/workflow_state_machine.py:10-78](file://backend/app/utils/workflow_state_machine.py#L10-L78)
 - [backend/app/services/notification_service.py:5-17](file://backend/app/services/notification_service.py#L5-L17)
+- [backend/app/services/config_service.py:41-100](file://backend/app/services/config_service.py#L41-L100)
 
 ## 性能与扩展性
 - 批量操作：启动周期时为多个员工创建记录与快照，建议关注批量插入的性能与事务边界。
 - 异步任务：归档时异步生成 PDF，避免阻塞主流程。
 - 统计查询：进度统计涉及多次聚合与关联查询，建议在高频访问场景考虑缓存或预聚合。
+- 配置缓存：config_service使用内存缓存提高配置读取性能。
 - 可扩展点：
   - 通过状态机注册额外校验函数，扩展业务约束。
   - 扩展通知渠道（邮件、短信、IM）。
   - 扩展报表导出格式（CSV、PDF）。
-
-[本节为通用指导，不涉及具体文件分析]
+  - 通过config_service扩展更多全局配置项。
 
 ## 故障排查指南
 - 周期不可修改：仅在 `not_started` 状态下可修改；否则返回错误。
@@ -518,18 +557,17 @@ NotificationService ..> AssessmentCycle : "通知触发"
 - 发布失败：检查是否有未完成审批或未完成面谈的记录。
 - 归档失败：仅 `published` 状态可归档；归档后周期与记录将被锁定。
 - 解冻失败：仅 `archived` 状态可解冻；解冻后周期与记录解锁。
+- **权重配置问题**：如果weights字段未提供，确认config_service中的默认配置是否正确设置。
 
 **章节来源**
-- [backend/app/routers/cycles.py:225-279](file://backend/app/routers/cycles.py#L225-L279)
-- [backend/app/routers/cycles.py:282-304](file://backend/app/routers/cycles.py#L282-L304)
-- [backend/app/routers/cycles.py:307-465](file://backend/app/routers/cycles.py#L307-L465)
+- [backend/app/routers/cycles.py:230-284](file://backend/app/routers/cycles.py#L230-L284)
+- [backend/app/routers/cycles.py:287-309](file://backend/app/routers/cycles.py#L287-L309)
+- [backend/app/routers/cycles.py:312-470](file://backend/app/routers/cycles.py#L312-L470)
 - [backend/app/routers/cycles.py:928-999](file://backend/app/routers/cycles.py#L928-L999)
-- [backend/app/routers/cycles.py:739-831](file://backend/app/routers/cycles.py#L739-L831)
+- [backend/app/routers/cycles.py:744-831](file://backend/app/routers/cycles.py#L744-L831)
 
 ## 结论
-本 API 体系以状态机为核心，严格约束考核周期的生命周期流转，并提供完善的参与者管理、进度监控、通知提醒与报表导出能力。通过清晰的配置参数与校验规则，确保业务流程的正确性与可追溯性。建议在大规模使用中关注批量操作性能与统计查询优化，并通过状态机扩展点持续完善业务约束。
-
-[本节为总结性内容，不涉及具体文件分析]
+本 API 体系以状态机为核心，严格约束考核周期的生命周期流转，并提供完善的参与者管理、进度监控、通知提醒与报表导出能力。通过清晰的配置参数与校验规则，确保业务流程的正确性与可追溯性。**新增的权重默认值机制**使得系统在未显式提供权重配置时能够自动使用全局默认配置，提高了系统的易用性和灵活性。建议在大规模使用中关注批量操作性能与统计查询优化，并通过状态机扩展点持续完善业务约束。
 
 ## 附录：接口清单与参数说明
 
@@ -558,22 +596,24 @@ NotificationService ..> AssessmentCycle : "通知触发"
 - `GET /{cycle_id}/export-excel`：导出周期汇总 Excel
 
 ### 关键参数说明
-- 维度权重（`dimension_weights`）：固定取 `config_service` 默认值 60/20/20，不可通过 API 覆盖。
-- 评分人权重：请求字段 `weights`（扁平 `{self, manager, peer}`，总和 100，可选）→ 落库列 `reviewer_weights`；不传则用 `config_service` 全局默认值（业绩 30/70/0、能力 20/60/20、态度 10/50/40）。
+- **维度权重（`weights`）**：**更新** 现在为可选参数。总和必须为 100。如未提供则使用config_service的全局默认值（performance: 60%, ability: 20%, attitude: 20%）。
+- 评分人权重（`reviewer_weights`）：每个维度下自评、上级、协作权重之和必须为 100。
 - 等级规则（`grade_rules`）：区间需满足连续性、不重叠、全覆盖与比例上限约束。
 - 时间设置：起止时间与阶段截止时间需满足递增与未来时间约束。
 - 参与范围：`department_ids` 可为空数组但会被拒绝；`small_dept_exemption`、`peer_review_enabled` 控制业务开关。
 
 **章节来源**
-- [backend/app/routers/cycles.py:49-114](file://backend/app/routers/cycles.py#L49-L114)
-- [backend/app/routers/cycles.py:117-156](file://backend/app/routers/cycles.py#L117-L156)
-- [backend/app/routers/cycles.py:159-222](file://backend/app/routers/cycles.py#L159-L222)
-- [backend/app/routers/cycles.py:225-304](file://backend/app/routers/cycles.py#L225-L304)
-- [backend/app/routers/cycles.py:307-465](file://backend/app/routers/cycles.py#L307-L465)
-- [backend/app/routers/cycles.py:468-566](file://backend/app/routers/cycles.py#L468-L566)
-- [backend/app/routers/cycles.py:569-709](file://backend/app/routers/cycles.py#L569-L709)
-- [backend/app/routers/cycles.py:712-831](file://backend/app/routers/cycles.py#L712-L831)
+- [backend/app/routers/cycles.py:50-115](file://backend/app/routers/cycles.py#L50-L115)
+- [backend/app/routers/cycles.py:118-157](file://backend/app/routers/cycles.py#L118-L157)
+- [backend/app/routers/cycles.py:160-227](file://backend/app/routers/cycles.py#L160-L227)
+- [backend/app/routers/cycles.py:230-309](file://backend/app/routers/cycles.py#L230-L309)
+- [backend/app/routers/cycles.py:312-470](file://backend/app/routers/cycles.py#L312-L470)
+- [backend/app/routers/cycles.py:473-571](file://backend/app/routers/cycles.py#L473-L571)
+- [backend/app/routers/cycles.py:574-714](file://backend/app/routers/cycles.py#L574-L714)
+- [backend/app/routers/cycles.py:717-831](file://backend/app/routers/cycles.py#L717-L831)
 - [backend/app/routers/cycles.py:834-925](file://backend/app/routers/cycles.py#L834-L925)
 - [backend/app/routers/cycles.py:928-1027](file://backend/app/routers/cycles.py#L928-L1027)
-- [backend/app/schemas.py:208-323](file://backend/app/schemas.py#L208-L323)
+- [backend/app/schemas.py:215-323](file://backend/app/schemas.py#L215-L323)
 - [backend/app/schemas.py:405-458](file://backend/app/schemas.py#L405-L458)
+- [backend/app/services/config_service.py:55-81](file://backend/app/services/config_service.py#L55-L81)
+- [backend/tests/test_cycle_default_weights.py:1-39](file://backend/tests/test_cycle_default_weights.py#L1-L39)

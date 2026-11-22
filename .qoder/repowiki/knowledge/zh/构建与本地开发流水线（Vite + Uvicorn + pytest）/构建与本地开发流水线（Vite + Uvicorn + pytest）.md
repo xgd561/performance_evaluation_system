@@ -21,7 +21,7 @@ source_files:
 仓库采用**前后端分离、各自独立构建**的轻量级方案，没有 Makefile / Dockerfile / CI YAML：
 
 - **后端 (Python/FastAPI)**：依赖通过 `backend/requirements.txt` 锁定版本（fastapi==0.111.0, uvicorn==0.30.0, sqlalchemy==2.0.31, alembic==1.13.1, pydantic==2.7.4 等），运行由 `uvicorn app.main:app` 驱动。
-- **前端 (Vue3/Vite)**：依赖通过 `frontend/package.json` 管理，构建命令为 `vite build`，开发服务器 `vite dev`（端口 3000，代理 `/api` → `http://localhost:8000`）。
+- **前端 (Vue3/Vite)**：依赖通过 `frontend/package.json` 管理，构建命令为 `vite build`，开发服务器 `vite dev`（端口 3000，代理 `/api` → `http://localhost:8014`）。
 - **测试**：后端使用 `pytest`（`backend/run_tests.bat` 封装），前端使用 `vitest run`（单元测试）+ `playwright test`（E2E，见 `frontend/package.json` scripts）。根目录 `tests/` 下还有一套跨模块的 pytest 用例（依赖校验、数据库模型、脚本验证等）。
 - **无容器化/CI**：仓库中未发现 `Dockerfile`、`.github/workflows`、`Jenkinsfile`、`Makefile`、`pyproject.toml`、`setup.py` 等文件；所有构建与启动均由 `.bat` / `.sh` 脚本完成，面向 Windows Git Bash 本地开发。
 
@@ -45,8 +45,8 @@ source_files:
 ### 3.1 启动流程
 
 1. **数据库初始化**：`python ../scripts/init_db.py`（从 `scripts/` 目录执行，自动 `cd backend` 并注入 `sys.path`），负责创建表、默认部门/岗位、系统配置、7 个演示账号，并在 `data/db/performance_evaluation.db` 落库。
-2. **后端服务**：`python -m uvicorn app.main:app --host 0.0.0.0 --port 8000`（或 8000，取决于脚本），`restart-services.bat` 同时拉起后端与前端两个 cmd 窗口。
-3. **前端服务**：`npm run dev`，Vite 在 3000 端口提供静态资源，并通过 proxy 将 `/api/*` 转发到后端 8000 端口。
+2. **后端服务**：`python -m uvicorn app.main:app --host 0.0.0.0 --port 8014`（或 8000，取决于脚本），`restart-services.bat` 同时拉起后端与前端两个 cmd 窗口。
+3. **前端服务**：`npm run dev`，Vite 在 3000 端口提供静态资源，并通过 proxy 将 `/api/*` 转发到后端 8014 端口。
 4. **健康检查**：`backend/restart.sh` 启动后轮询 `http://localhost:8000/api/v1/auth/login`，HTTP 200/405 视为就绪，最多重试 10 秒。
 
 ### 3.2 目录结构约束
@@ -76,7 +76,7 @@ uploads/
 
 | 服务 | 默认端口 | 来源 |
 |---|---:|---|
-| 后端 API | 8000 | `restart-services.bat` 中 `BACKEND_PORT=8000` |
+| 后端 API | 8014 | `restart-services.bat` 中 `BACKEND_PORT=8014` |
 | 前端 Dev Server | 3000 | `frontend/vite.config.js` server.port |
 | 旧版脚本兼容端口 | 8000 | `scripts/restart.bat`、`backend/restart.sh` |
 

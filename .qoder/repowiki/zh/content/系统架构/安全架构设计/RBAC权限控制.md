@@ -9,9 +9,20 @@
 - [backend/app/routers/employees.py](file://backend/app/routers/employees.py)
 - [backend/app/routers/departments.py](file://backend/app/routers/departments.py)
 - [backend/app/routers/config.py](file://backend/app/routers/config.py)
+- [backend/app/routers/interviews.py](file://backend/app/routers/interviews.py)
+- [backend/app/routers/scores.py](file://backend/app/routers/scores.py)
+- [backend/app/routers/reports.py](file://backend/app/routers/reports.py)
 - [backend/tests/test_p21_dashboard_role_scoped_stats.py](file://backend/tests/test_p21_dashboard_role_scoped_stats.py)
 - [backend/tests/test_p22_require_role_is_active.py](file://backend/tests/test_p22_require_role_is_active.py)
+- [backend/tests/test_p20_sub_department_visibility.py](file://backend/tests/test_p20_sub_department_visibility.py)
 </cite>
+
+## 更新摘要
+**所做更改**   
+- 新增 `get_descendant_dept_ids` 函数的详细说明，用于增强数据可见性安全
+- 更新数据级别权限控制章节，说明新的部门层级隔离机制
+- 添加细粒度数据访问控制的实现细节和最佳实践
+- 更新相关测试用例和安全性考虑
 
 ## 目录
 1. [引言](#引言)
@@ -26,33 +37,36 @@
 10. [附录：角色与接口权限矩阵](#附录角色与接口权限矩阵)
 
 ## 引言
-本文面向“基于角色的访问控制（RBAC）”在绩效考核评分系统中的实现，重点说明以下内容：
+本文面向"基于角色的访问控制（RBAC）"在绩效考核评分系统中的实现，重点说明以下内容：
 - 角色定义与权限分配模型：管理员、HR、部门经理、普通员工、协作人、高管等。
 - `require_role` 装饰器的实现原理、多角色检查与使用方式。
-- 数据级别的权限控制：部门层级隔离、上下级链判断、数据可见性规则。
+- **增强的数据级别权限控制**：部门层级隔离、上下级链判断、**新的 `get_descendant_dept_ids` 函数**、数据可见性规则。
 - 中间件式依赖注入的权限验证流程与自定义权限检查函数使用方法。
 - 权限配置的最佳实践与安全建议。
 
-本系统采用 FastAPI 依赖注入机制实现认证与授权，结合数据库中的用户角色字段与组织关系字段，完成接口级与数据级双重权限控制。
+本系统采用 FastAPI 依赖注入机制实现认证与授权，结合数据库中的用户角色字段与组织关系字段，完成接口级与数据级双重权限控制。**最新的安全增强通过 `get_descendant_dept_ids` 函数实现了更精细的数据访问控制，有效防止跨部门数据泄露。**
 
 ## 项目结构
 后端权限相关代码主要分布在以下模块：
 - 认证与鉴权：`app/auth.py`、`app/core/security.py`
 - 数据模型：`app/models.py`
-- 路由层权限控制：`app/routers/*.py`（如 dashboard、employees、departments、config）
-- 测试用例：覆盖角色统计、禁用用户拦截等场景
+- 路由层权限控制：`app/routers/*.py`（如 dashboard、employees、departments、config、interviews、scores、reports）
+- 测试用例：覆盖角色统计、禁用用户拦截、子部门可见性等场景
 
 ```mermaid
 graph TB
 Client["客户端"] --> API["FastAPI 路由层"]
 API --> Auth["认证与鉴权<br/>get_current_user / require_role"]
+API --> DataIsolation["数据隔离<br/>get_all_dept_ids / get_descendant_dept_ids"]
 API --> DB["数据库模型<br/>User / Employee / Department"]
 Auth --> DB
+DataIsolation --> DB
 ```
 
 **图表来源**
 - [backend/app/auth.py:68-129](file://backend/app/auth.py#L68-L129)
 - [backend/app/models.py:8-60](file://backend/app/models.py#L8-L60)
+- [backend/app/routers/employees.py:447-469](file://backend/app/routers/employees.py#L447-L469)
 
 **章节来源**
 - [backend/app/auth.py:1-130](file://backend/app/auth.py#L1-L130)
@@ -63,7 +77,7 @@ Auth --> DB
 - 用户模型与角色字段
 - JWT 认证与当前用户解析
 - `require_role` 装饰器
-- 部门层级与数据可见性工具方法
+- **增强的部门层级与数据可见性工具方法**
 - 典型路由中的角色校验与数据隔离
 
 ### 用户模型与角色字段
@@ -167,34 +181,68 @@ CheckRole --> |是| Allow["返回当前用户"]
 **章节来源**
 - [backend/app/auth.py:116-129](file://backend/app/auth.py#L116-L129)
 
-### 数据级别权限控制：部门层级隔离与可见性规则
-系统在多个路由中实现了数据级权限控制，核心包括：
-- 普通员工只能查看自己的数据。
-- 部门经理可查看本部门及子部门的员工，以及下属员工。
-- 使用递归函数收集部门及其子部门 ID，并结合直属上级关系进行过滤。
-- 针对单个员工详情接口，进一步判断目标员工是否在当前管理者的下属链中。
+### **增强的数据级别权限控制：部门层级隔离与细粒度可见性规则**
+
+**更新** 系统现在提供了两个关键的部门ID收集函数来实现更精确的数据访问控制：
+
+#### 基础部门ID收集：`get_all_dept_ids`
+递归收集指定部门及其所有子部门ID，包括本部门本身。用于列表类接口的数据过滤。
+
+#### **新增细粒度部门ID收集：`get_descendant_dept_ids`**
+**重要安全增强** 只收集下级部门ID，不包含本部门本身。这个函数专门用于细粒度查询场景，确保"同部门非下属不可见、下级部门成员可见"的安全策略。
 
 ```mermaid
 flowchart TD
-Start(["请求员工列表/详情"]) --> RoleCheck{"当前用户角色"}
-RoleCheck --> |employee| SelfOnly["仅允许查看自己"]
-RoleCheck --> |manager| DeptChain["计算部门+子部门ID + 下属ID"]
-RoleCheck --> |admin/hr/executive| AllowAll["允许全部"]
-DeptChain --> FilterQuery["构建 SQL 过滤条件"]
-SelfOnly --> FilterQuery
-AllowAll --> FilterQuery
-FilterQuery --> ReturnData["返回符合权限的数据"]
+Start(["计算可见范围"]) --> Choice{"查询类型"}
+Choice --> |列表类接口| GetAllDept["get_all_dept_ids<br/>包含本部门+子部门"]
+Choice --> |细粒度查询| GetDescendant["get_descendant_dept_ids<br/>仅子部门，不含本部门"]
+GetAllDept --> BuildFilter["构建过滤条件<br/>部门ID in dept_ids OR 下属ID"]
+GetDescendant --> FineGrainedFilter["细粒度过滤<br/>本人 + 下属链 + 下级部门成员"]
+BuildFilter --> ApplyQuery["应用到SQL查询"]
+FineGrainedFilter --> ApplyQuery
+ApplyQuery --> Result["返回受限结果集"]
 ```
 
 **图表来源**
-- [backend/app/routers/employees.py:233-312](file://backend/app/routers/employees.py#L233-L312)
-- [backend/app/routers/employees.py:357-401](file://backend/app/routers/employees.py#L357-L401)
-- [backend/app/routers/employees.py:437-466](file://backend/app/routers/employees.py#L437-L466)
+- [backend/app/routers/employees.py:447-469](file://backend/app/routers/employees.py#L447-L469)
+
+#### 细粒度数据访问控制规则
+系统在多个关键接口中实施了严格的数据访问控制：
+
+1. **面谈记录查看**：经理只能查看本人、下属链、下级部门成员的面谈记录
+2. **考核详情查看**：经理只能查看本人、下属链、下级部门成员的考核详情  
+3. **员工趋势查看**：经理只能查看本人、下属链、下级部门成员的趋势数据
+4. **员工详情查看**：严格的部门层级隔离，防止同部门非下属的数据泄露
+
+```mermaid
+flowchart TD
+Start(["请求敏感数据"]) --> RoleCheck{"当前用户角色"}
+RoleCheck --> |employee| SelfOnly["仅允许查看自己"]
+RoleCheck --> |manager| MultiCheck["多重权限检查"]
+RoleCheck --> |admin/hr/executive| AllowAll["允许全部"]
+MultiCheck --> CheckSelf{"是否本人?"}
+CheckSelf --> |是| AllowSelf["允许访问"]
+CheckSelf --> |否| CheckSubordinate{"是否下属链?"}
+CheckSubordinate --> |是| AllowSub["允许访问"]
+CheckSubordinate --> |否| CheckDept{"是否下级部门?"}
+CheckDept --> |是| AllowDept["允许访问"]
+CheckDept --> |否| DenyAccess["拒绝访问 - 防止数据泄露"]
+AllowSelf --> ReturnData["返回数据"]
+AllowSub --> ReturnData
+AllowDept --> ReturnData
+DenyAccess --> Error["返回 403 错误"]
+```
+
+**图表来源**
+- [backend/app/routers/interviews.py:167-174](file://backend/app/routers/interviews.py#L167-L174)
+- [backend/app/routers/scores.py:1051-1059](file://backend/app/routers/scores.py#L1051-L1059)
+- [backend/app/routers/reports.py:235-246](file://backend/app/routers/reports.py#L235-L246)
 
 **章节来源**
-- [backend/app/routers/employees.py:233-312](file://backend/app/routers/employees.py#L233-L312)
-- [backend/app/routers/employees.py:357-401](file://backend/app/routers/employees.py#L357-L401)
-- [backend/app/routers/employees.py:437-466](file://backend/app/routers/employees.py#L437-L466)
+- [backend/app/routers/employees.py:447-469](file://backend/app/routers/employees.py#L447-L469)
+- [backend/app/routers/interviews.py:167-174](file://backend/app/routers/interviews.py#L167-L174)
+- [backend/app/routers/scores.py:1051-1059](file://backend/app/routers/scores.py#L1051-L1059)
+- [backend/app/routers/reports.py:235-246](file://backend/app/routers/reports.py#L235-L246)
 
 ### 仪表盘按角色聚合统计
 仪表盘接口根据当前用户角色返回不同维度的统计数据：
@@ -233,7 +281,7 @@ D-->>C : "返回角色相关的 stats"
 - [backend/app/routers/dashboard.py:15-136](file://backend/app/routers/dashboard.py#L15-L136)
 
 ## 架构总览
-下图展示从客户端到数据库的完整 RBAC 流程，包括认证、角色校验、数据隔离与业务处理。
+下图展示从客户端到数据库的完整 RBAC 流程，包括认证、角色校验、**增强的数据隔离**与业务处理。
 
 ```mermaid
 graph TB
@@ -243,7 +291,8 @@ Router --> DepRole["依赖注入: require_role(...)"]
 DepAuth --> Model["User/Employee/Department 模型"]
 DepRole --> Model
 Router --> Service["业务服务/统计逻辑"]
-Service --> Model
+Service --> DataIsolation["数据隔离层<br/>get_all_dept_ids / get_descendant_dept_ids"]
+DataIsolation --> Model
 Model --> DB["数据库"]
 ```
 
@@ -251,6 +300,7 @@ Model --> DB["数据库"]
 - [backend/app/auth.py:68-129](file://backend/app/auth.py#L68-L129)
 - [backend/app/models.py:8-60](file://backend/app/models.py#L8-L60)
 - [backend/app/routers/dashboard.py:15-136](file://backend/app/routers/dashboard.py#L15-L136)
+- [backend/app/routers/employees.py:447-469](file://backend/app/routers/employees.py#L447-L469)
 
 ## 详细组件分析
 
@@ -285,10 +335,21 @@ Model --> DB["数据库"]
 - [backend/app/routers/dashboard.py:139-143](file://backend/app/routers/dashboard.py#L139-L143)
 - [backend/app/routers/dashboard.py:244-253](file://backend/app/routers/dashboard.py#L244-L253)
 
-### 数据级权限控制：部门层级与下属链
-- `get_all_dept_ids`：递归收集指定部门及其所有子部门 ID。
-- `_is_in_subordinate_chain`：判断目标员工是否为当前管理者的直接或间接下属。
-- 员工列表与详情接口中，依据角色与上述工具方法进行数据过滤。
+### **增强的数据级权限控制：部门层级与下属链**
+
+**更新** 系统现在提供了两个互补的部门ID收集函数来实现精确的数据访问控制：
+
+#### 基础函数：`get_all_dept_ids`
+递归收集指定部门及其所有子部门ID，包括本部门本身。主要用于列表类接口，允许经理查看本部门及子部门的员工。
+
+#### **新增函数：`get_descendant_dept_ids`**
+**安全增强** 只收集下级部门ID，排除本部门本身。这个函数专门用于细粒度查询场景，确保：
+- 同部门非下属不可见（防止横向数据泄露）
+- 下级部门成员可见（纵向管理权限）
+- 本人和下属链始终可见
+
+#### 辅助函数：`_is_in_subordinate_chain`
+判断目标员工是否为当前管理者的直接或间接下属，通过向上追溯管理链实现。
 
 ```mermaid
 flowchart TD
@@ -300,12 +361,12 @@ ApplyQuery --> Result["返回受限结果集"]
 ```
 
 **图表来源**
-- [backend/app/routers/employees.py:437-466](file://backend/app/routers/employees.py#L437-L466)
-- [backend/app/routers/employees.py:250-260](file://backend/app/routers/employees.py#L250-L260)
+- [backend/app/routers/employees.py:447-469](file://backend/app/routers/employees.py#L447-L469)
+- [backend/app/routers/employees.py:472-485](file://backend/app/routers/employees.py#L472-L485)
 
 **章节来源**
-- [backend/app/routers/employees.py:437-466](file://backend/app/routers/employees.py#L437-L466)
-- [backend/app/routers/employees.py:250-260](file://backend/app/routers/employees.py#L250-L260)
+- [backend/app/routers/employees.py:447-469](file://backend/app/routers/employees.py#L447-L469)
+- [backend/app/routers/employees.py:472-485](file://backend/app/routers/employees.py#L472-L485)
 
 ### 部门与岗位管理权限
 部门与岗位的增删改查接口大多要求管理员或 HR 角色，部分查询接口仅需认证即可访问。
@@ -315,15 +376,53 @@ ApplyQuery --> Result["返回受限结果集"]
 - [backend/app/routers/departments.py:87-148](file://backend/app/routers/departments.py#L87-L148)
 - [backend/app/routers/departments.py:154-212](file://backend/app/routers/departments.py#L154-L212)
 
+### **细粒度数据访问控制实现**
+
+**更新** 系统在多个关键接口中实施了严格的数据访问控制，使用新的 `get_descendant_dept_ids` 函数：
+
+#### 面谈记录访问控制
+经理只能查看本人、下属链、下级部门成员的面谈记录，同部门非下属被明确拒绝访问。
+
+#### 考核详情访问控制  
+经理只能查看本人、下属链、下级部门成员的考核详情，防止敏感绩效数据泄露。
+
+#### 员工趋势数据访问控制
+经理只能查看本人、下属链、下级部门成员的趋势数据，确保数据分析的安全性。
+
+```mermaid
+flowchart TD
+Start(["细粒度数据访问"]) --> CheckSelf{"是否本人?"}
+CheckSelf --> |是| AllowSelf["允许访问"]
+CheckSelf --> |否| CheckChain{"是否下属链?"}
+CheckChain --> |是| AllowChain["允许访问"]
+CheckChain --> |否| CheckDept{"是否下级部门?"}
+CheckDept --> |是| AllowDept["允许访问"]
+CheckDept --> |否| Deny["拒绝访问 - 数据安全"]
+AllowSelf --> Success["成功访问"]
+AllowChain --> Success
+AllowDept --> Success
+Deny --> Error["403 权限不足"]
+```
+
+**图表来源**
+- [backend/app/routers/interviews.py:167-174](file://backend/app/routers/interviews.py#L167-L174)
+- [backend/app/routers/scores.py:1051-1059](file://backend/app/routers/scores.py#L1051-L1059)
+- [backend/app/routers/reports.py:235-246](file://backend/app/routers/reports.py#L235-L246)
+
+**章节来源**
+- [backend/app/routers/interviews.py:167-174](file://backend/app/routers/interviews.py#L167-L174)
+- [backend/app/routers/scores.py:1051-1059](file://backend/app/routers/scores.py#L1051-L1059)
+- [backend/app/routers/reports.py:235-246](file://backend/app/routers/reports.py#L235-L246)
+
 ## 依赖关系分析
 - 路由层依赖 `app.auth` 提供的 `get_current_user` 与 `require_role`。
-- 数据隔离逻辑集中在 `app/routers/employees.py`，被其他路由复用（如 dashboard）。
+- **增强的数据隔离逻辑**集中在 `app/routers/employees.py`，被其他路由复用（如 interviews、scores、reports）。
 - 模型层提供统一的数据实体，支撑认证、授权与业务逻辑。
 
 ```mermaid
 graph LR
-Routers["路由层<br/>dashboard/employees/departments/config"] --> Auth["auth.py<br/>get_current_user / require_role"]
-Routers --> EmployeesUtil["employees.py<br/>get_all_dept_ids / _is_in_subordinate_chain"]
+Routers["路由层<br/>dashboard/employees/departments/config/interviews/scores/reports"] --> Auth["auth.py<br/>get_current_user / require_role"]
+Routers --> EmployeesUtil["employees.py<br/>get_all_dept_ids / get_descendant_dept_ids / _is_in_subordinate_chain"]
 Auth --> Models["models.py<br/>User / Employee / Department"]
 EmployeesUtil --> Models
 ```
@@ -342,34 +441,35 @@ EmployeesUtil --> Models
 
 ## 性能与可扩展性
 - 角色校验为轻量级字符串比较，开销极低。
-- 部门层级递归查询可能带来额外数据库访问，建议在高频场景中对部门树进行缓存。
+- **部门层级递归查询可能带来额外数据库访问**，建议在高频场景中对部门树进行缓存。
+- **新增的 `get_descendant_dept_ids` 函数通过集合运算优化了细粒度查询性能**。
 - 数据隔离通过 SQL 过滤实现，避免全表扫描；但复杂组织树下需关注 IN 列表大小与索引设计。
 - 可扩展方向：
   - 引入权限组与资源映射表，支持更细粒度的资源级权限。
-  - 将 `require_role` 扩展为 `require_permission`，支持动作级权限（如“编辑”、“导出”）。
+  - 将 `require_role` 扩展为 `require_permission`，支持动作级权限（如"编辑"、"导出"）。
   - 对部门树与下属链计算结果进行缓存，降低重复查询成本。
-
-[本节为通用指导，不直接分析具体文件]
+  - **考虑为 `get_descendant_dept_ids` 添加结果缓存，减少重复计算开销**。
 
 ## 故障排查指南
 常见问题与定位要点：
 - 401 未认证：检查 Authorization Header 是否正确携带 Bearer Token，Token 是否有效且未过期。
 - 403 权限不足：检查 `require_role` 中允许的角色是否包含当前用户角色；确认用户 `role` 字段设置正确。
 - 403 用户已被禁用：检查用户 `is_active` 字段；若首次登录未改密，需访问白名单接口修改密码。
-- 数据不可见：检查部门层级与下属链判断逻辑，确认当前用户是否能访问目标员工所在部门或下属链。
+- **数据不可见**：检查部门层级与下属链判断逻辑，确认当前用户是否能访问目标员工所在部门或下属链。**特别注意新增加的 `get_descendant_dept_ids` 函数是否正确使用**。
+- **细粒度访问被拒绝**：检查是否误用了 `get_all_dept_ids` 而非 `get_descendant_dept_ids`，或者目标员工不在允许的访问范围内。
 
 相关测试用例参考：
 - 仪表盘按角色统计：[backend/tests/test_p21_dashboard_role_scoped_stats.py](file://backend/tests/test_p21_dashboard_role_scoped_stats.py)
 - `require_role` 对禁用用户的拦截：[backend/tests/test_p22_require_role_is_active.py](file://backend/tests/test_p22_require_role_is_active.py)
+- **子部门可见性与数据隔离**：[backend/tests/test_p20_sub_department_visibility.py](file://backend/tests/test_p20_sub_department_visibility.py)
 
 **章节来源**
 - [backend/tests/test_p21_dashboard_role_scoped_stats.py](file://backend/tests/test_p21_dashboard_role_scoped_stats.py)
 - [backend/tests/test_p22_require_role_is_active.py](file://backend/tests/test_p22_require_role_is_active.py)
+- [backend/tests/test_p20_sub_department_visibility.py](file://backend/tests/test_p20_sub_department_visibility.py)
 
 ## 结论
-本系统的 RBAC 实现以 FastAPI 依赖注入为核心，结合用户角色字段与组织关系字段，完成了接口级与数据级的双重权限控制。`require_role` 提供了简洁的多角色检查能力，部门层级与下属链工具方法保障了数据可见性的准确性。未来可通过权限组、资源级权限与缓存优化进一步提升灵活性与性能。
-
-[本节为总结性内容，不直接分析具体文件]
+本系统的 RBAC 实现以 FastAPI 依赖注入为核心，结合用户角色字段与组织关系字段，完成了接口级与数据级的双重权限控制。**最新的 `get_descendant_dept_ids` 函数增强了数据可见性安全，有效防止了跨部门数据泄露，确保了"本人 + 下属链 + 下级部门"的精确访问控制**。`require_role` 提供了简洁的多角色检查能力，部门层级与下属链工具方法保障了数据可见性的准确性。未来可通过权限组、资源级权限与缓存优化进一步提升灵活性与性能。
 
 ## 附录：角色与接口权限矩阵
 以下为常见接口的角色权限概览（基于源码中的 `require_role` 与路由逻辑）：
@@ -388,6 +488,12 @@ EmployeesUtil --> Models
   - 部门经理：查看本部门及子部门、下属
   - 普通员工：仅查看自身
 
+- **细粒度数据接口（面谈、考核详情、趋势）**：
+  - 管理员/HR/高管：完全访问
+  - 部门经理：本人 + 下属链 + 下级部门成员
+  - 普通员工：仅本人
+  - **同部门非下属：明确拒绝访问**
+
 - 认证接口：
   - 登录、刷新、个人信息、修改密码、登出：认证白名单
 
@@ -398,3 +504,6 @@ EmployeesUtil --> Models
 - [backend/app/routers/dashboard.py:244-253](file://backend/app/routers/dashboard.py#L244-L253)
 - [backend/app/routers/employees.py:233-312](file://backend/app/routers/employees.py#L233-L312)
 - [backend/app/routers/departments.py:87-148](file://backend/app/routers/departments.py#L87-L148)
+- [backend/app/routers/interviews.py:167-174](file://backend/app/routers/interviews.py#L167-L174)
+- [backend/app/routers/scores.py:1051-1059](file://backend/app/routers/scores.py#L1051-L1059)
+- [backend/app/routers/reports.py:235-246](file://backend/app/routers/reports.py#L235-L246)

@@ -148,8 +148,6 @@ API-->>FE : 提示成功并刷新列表
   - 字段：record_id、original_kpi、adjusted_kpi、reason、status、created_at
   - 作用：记录KPI目标的临时调整申请与审批结果
 
-> 本图为局部关系片段，完整实体关系与约束以 [ER图设计.md](../系统架构/数据库架构设计/ER图设计.md) 为唯一权威来源。
-
 ```mermaid
 erDiagram
 POSITION ||--o{ KPI_TEMPLATE : "拥有"

@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: backend_service/system_services
+title: 系统配置与通知路由层
+scope:
+    - backend/app/routers/config.py
+    - backend/app/routers/notifications.py
+    - backend/app/routers/health.py
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app
