@@ -145,6 +145,20 @@ async function advanceToInterviewViaApi(page, token, cycleId) {
   return body
 }
 
+async function submitInterviewViaApi(page, token, recordId) {
+  const res = await page.request.post(`/api/assessment-records/${recordId}/interview`, {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    data: JSON.stringify({
+      interview_time: new Date(Date.now() - 3600_000).toISOString(),
+      location: '会议室',
+      content: '本次面谈已就本期绩效结果与下期改进方向达成一致，员工认可评分结果并确认后续行动计划。'
+    })
+  })
+  const body = await res.json()
+  if (!res.ok()) throw new Error(`Submit interview failed: ${JSON.stringify(body)}`)
+  return body
+}
+
 async function createAppealViaApi(page, token, recordId, reason) {
   const res = await page.request.post('/api/appeals', {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -764,6 +778,7 @@ test.describe('HR 场景', () => {
 
       await calculateScoresViaApi(page, hrToken, cycle.id)
       await advanceToInterviewViaApi(page, hrToken, cycle.id)
+      await submitInterviewViaApi(page, hrToken, record.record_id)
 
       await hrLogin(page)
       await page.goto('/cycles')

@@ -123,6 +123,21 @@ async function advanceToInterviewViaApi(page, token, cycleId) {
   return body
 }
 
+// 面谈是发布前的强制节点：发布前必须先为该记录提交面谈
+async function submitInterviewViaApi(page, token, recordId) {
+  const res = await page.request.post(`/api/assessment-records/${recordId}/interview`, {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    data: JSON.stringify({
+      interview_time: new Date(Date.now() - 3600_000).toISOString(),
+      location: '会议室',
+      content: '本次面谈已就本期绩效结果与下期改进方向达成一致，员工认可评分结果并确认后续行动计划。'
+    })
+  })
+  const body = await res.json()
+  if (!res.ok()) throw new Error(`Submit interview failed: ${JSON.stringify(body)}`)
+  return body
+}
+
 async function publishCycleViaApi(page, token, cycleId) {
   const res = await page.request.post(`/api/assessment-cycles/${cycleId}/publish`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -308,6 +323,7 @@ test.describe.serial('Employee 核心操作流', () => {
 
     await calculateScoresViaApi(page, hrToken, cycle.id)
     await advanceToInterviewViaApi(page, hrToken, cycle.id)
+    await submitInterviewViaApi(page, hrToken, record.record_id)
     await publishCycleViaApi(page, hrToken, cycle.id)
 
     // 员工操作：emp001 登录并查看考核详情
@@ -382,6 +398,7 @@ test.describe.serial('Employee 核心操作流', () => {
 
     await calculateScoresViaApi(page, hrToken, cycle.id)
     await advanceToInterviewViaApi(page, hrToken, cycle.id)
+    await submitInterviewViaApi(page, hrToken, record.record_id)
     await publishCycleViaApi(page, hrToken, cycle.id)
 
     // 员工操作：emp001 登录并发起申诉
@@ -456,6 +473,7 @@ test.describe.serial('Employee 核心操作流', () => {
 
     await calculateScoresViaApi(page, hrToken, cycle.id)
     await advanceToInterviewViaApi(page, hrToken, cycle.id)
+    await submitInterviewViaApi(page, hrToken, record.record_id)
     await publishCycleViaApi(page, hrToken, cycle.id)
 
     // 通过 API 创建申诉记录（属于员工职责，但为前置数据准备）

@@ -13,12 +13,22 @@ import { test, expect } from '@playwright/test'
  * - 提交协作评分：peer001（前端操作）
  * - 触发汇总：hr001（前端操作）
  * - 记录面谈：mgr001（前端操作）
- * - 审批：mgr001（前端操作，系统缺陷下走空状态路径）
+ * - 审批：mgr001（前端操作，calculate_scores 后记录已进入 pending_approval）
  * - 发布结果：hr001（前端操作）
  * - 查看结果：emp001（前端操作）
  */
 
 // --- Auth helpers ---
+// 测试账号凭据（与 docs/KNOWLEDGE_BASE.md 默认测试账号保持一致，
+// 数据库重新种子化后除 admin 外的账号密码均已改为复杂密码）
+const TEST_CREDENTIALS: Record<string, string> = {
+  admin: 'admin123',
+  hr001: 'Hr001@123',
+  mgr001: 'Mgr001@123',
+  emp001: 'Emp001@123',
+  peer001: 'Peer001@123',
+}
+
 async function getToken(page, username, password) {
   const res = await page.request.post('/api/v1/auth/login', {
     headers: { 'Content-Type': 'application/json' },
@@ -32,14 +42,28 @@ async function getToken(page, username, password) {
 }
 
 // --- API helpers ---
+// 动态生成周期日期：后端校验 start_date 不能早于今天，硬编码日期会随时间过期导致 422
+// （使用本地时间格式化，避免 toISOString 的 UTC 偏移）
+function getCycleDateRange(): { start_date: string; end_date: string } {
+  const fmt = (d: Date) => {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+  const start = new Date()
+  const end = new Date()
+  end.setMonth(end.getMonth() + 1)
+  return { start_date: fmt(start), end_date: fmt(end) }
+}
+
 async function createCycleViaApi(page, token, name) {
   const res = await page.request.post('/api/v1/assessment-cycles', {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: JSON.stringify({
       name,
       type: 'monthly',
-      start_date: '2026-07-07',
-      end_date: '2026-07-31',
+      ...getCycleDateRange(),
       weights: { self: 30, manager: 50, peer: 20 },
       grade_rules: { A: 90, B: 80, C: 60, D: 0 }
     })
@@ -133,6 +157,21 @@ async function advanceToInterviewViaApi(page, token, cycleId) {
   return body
 }
 
+// 面谈是发布前的强制节点：发布前必须先为该记录提交面谈
+async function submitInterviewViaApi(page, token, recordId) {
+  const res = await page.request.post(`/api/v1/assessment-records/${recordId}/interview`, {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    data: JSON.stringify({
+      interview_time: new Date(Date.now() - 3600_000).toISOString(),
+      location: '会议室',
+      content: '本次面谈已就本期绩效结果与下期改进方向达成一致，员工认可评分结果并确认后续行动计划。'
+    })
+  })
+  const body = await res.json()
+  if (!res.ok()) throw new Error(`Submit interview failed: ${JSON.stringify(body)}`)
+  return body
+}
+
 async function publishCycleViaApi(page, token, cycleId) {
   const res = await page.request.post(`/api/v1/assessment-cycles/${cycleId}/publish`, {
     headers: { Authorization: `Bearer ${token}` }
@@ -146,7 +185,7 @@ async function publishCycleViaApi(page, token, cycleId) {
 async function employeeLogin(page) {
   await page.goto('/login')
   await page.getByPlaceholder('用户名').fill('emp001')
-  await page.getByPlaceholder('密码').fill('admin123')
+  await page.getByPlaceholder('密码').fill(TEST_CREDENTIALS.emp001)
   await page.getByRole('button', { name: '登录' }).click()
   await page.waitForURL('**/dashboard')
 }
@@ -154,7 +193,7 @@ async function employeeLogin(page) {
 async function managerLogin(page) {
   await page.goto('/login')
   await page.getByPlaceholder('用户名').fill('mgr001')
-  await page.getByPlaceholder('密码').fill('admin123')
+  await page.getByPlaceholder('密码').fill(TEST_CREDENTIALS.mgr001)
   await page.getByRole('button', { name: '登录' }).click()
   await page.waitForURL('**/dashboard')
 }
@@ -162,7 +201,7 @@ async function managerLogin(page) {
 async function peerLogin(page) {
   await page.goto('/login')
   await page.getByPlaceholder('用户名').fill('peer001')
-  await page.getByPlaceholder('密码').fill('admin123')
+  await page.getByPlaceholder('密码').fill(TEST_CREDENTIALS.peer001)
   await page.getByRole('button', { name: '登录' }).click()
   await page.waitForURL('**/dashboard')
 }
@@ -170,7 +209,7 @@ async function peerLogin(page) {
 async function hrLogin(page) {
   await page.goto('/login')
   await page.getByPlaceholder('用户名').fill('hr001')
-  await page.getByPlaceholder('密码').fill('admin123')
+  await page.getByPlaceholder('密码').fill(TEST_CREDENTIALS.hr001)
   await page.getByRole('button', { name: '登录' }).click()
   await page.waitForURL('**/dashboard')
 }
@@ -181,8 +220,7 @@ async function createCycleWithRatioLimitsViaApi(page, token, name) {
     data: JSON.stringify({
       name,
       type: 'monthly',
-      start_date: '2026-07-07',
-      end_date: '2026-07-31',
+      ...getCycleDateRange(),
       weights: { self: 30, manager: 50, peer: 20 },
       grade_rules: {
         A: { min: 90, max: 100, ratio_limit: 0.0 },
@@ -239,7 +277,7 @@ test.describe.serial('完整绩效考核 Happy Path', () => {
   test('Step 0: 前置数据准备（Admin 创建周期，HR 发起考核）', async ({ page }) => {
     // 前置：Admin 创建周期，HR 发起考核（包含 emp001）
     // 注意：以下 API 调用属于 Admin/HR 职责范围，仅作为测试数据前置准备
-    const adminToken = await getToken(page, 'admin', 'admin123')
+    const adminToken = await getToken(page, 'admin', TEST_CREDENTIALS.admin)
     cycleName = `FULL-CYCLE-${Date.now()}`
     const cycle = await createCycleViaApi(page, adminToken, cycleName)
     cycleId = cycle.id
@@ -253,7 +291,7 @@ test.describe.serial('完整绩效考核 Happy Path', () => {
     mgrId = mgr.id
     peerId = peer.id
 
-    const hrToken = await getToken(page, 'hr001', 'admin123')
+    const hrToken = await getToken(page, 'hr001', TEST_CREDENTIALS.hr001)
     await launchCycleViaApi(page, hrToken, cycleId, [employeeId])
 
     // 获取 recordId
@@ -414,7 +452,7 @@ test.describe.serial('完整绩效考核 Happy Path', () => {
 
   test('Step 5: 经理记录绩效面谈', async ({ page }) => {
     // 使用测试辅助 API 将记录推进到 pending_interview（模拟审批完成后的状态）
-    const adminToken = await getToken(page, 'admin', 'admin123')
+    const adminToken = await getToken(page, 'admin', TEST_CREDENTIALS.admin)
     await advanceToInterviewViaApi(page, adminToken, cycleId)
 
     await managerLogin(page)
@@ -448,28 +486,27 @@ test.describe.serial('完整绩效考核 Happy Path', () => {
   })
 
   test('Step 6: 经理审批下属绩效', async ({ page }) => {
+    // calculate_scores 已通过状态机将无强制分布调整的记录推进到 pending_approval，
+    // 审批工作台可正常展示待审批项；Step 5 的面谈前置操作可能已将状态推进到
+    // pending_interview，这里用测试辅助接口推回 pending_approval 后走真实审批交互
+    const adminToken = await getToken(page, 'admin', TEST_CREDENTIALS.admin)
+    await advanceToApprovalViaApi(page, adminToken, cycleId)
+
     await managerLogin(page)
 
     await page.goto('/approval-workbench')
     await page.waitForLoadState('networkidle')
 
-    // 检查是否有待审批记录
-    const hasRecords = await page.locator('button').filter({ hasText: '通过' }).count() > 0
+    // 点击通过
+    await page.locator('button').filter({ hasText: '通过' }).first().click()
+    // 确认对话框（Element Plus 在部分场景下显示 OK 而非 确定）
+    await page.locator('.el-message-box').getByRole('button', { name: 'OK' }).click()
+    // 断言成功
+    await expect(page.getByText('审批通过').first()).toBeVisible()
 
-    if (hasRecords) {
-      // 点击通过
-      await page.locator('button').filter({ hasText: '通过' }).first().click()
-      // 确认对话框（Element Plus 在部分场景下显示 OK 而非 确定）
-      await page.locator('.el-message-box').getByRole('button', { name: 'OK' }).click()
-      // 断言成功
-      await expect(page.getByText('审批通过').first()).toBeVisible()
-    } else {
-      // 系统缺陷：calculate_scores 后状态为 pending_summary，审批工作台只查询 pending_approval
-      // 断言空状态
-      await expect(page.locator('.el-empty')).toBeVisible()
-      await expect(page.getByText('暂无待审批记录')).toBeVisible()
-      test.info().annotations.push({ type: 'issue', description: '系统缺陷：calculate_scores 后状态为 pending_summary，审批工作台只查询 pending_approval，导致无法测试审批通过' })
-    }
+    // 默认审批链为三级（direct_manager → dept_head → hr_head），本步骤仅验证第一步审批；
+    // 用测试辅助接口模拟剩余审批完成，推进到 pending_interview 以便 Step 7 发布
+    await advanceToInterviewViaApi(page, adminToken, cycleId)
   })
 
   test('Step 7: HR 发布考核结果', async ({ page }) => {
@@ -548,7 +585,7 @@ test.describe.serial('申诉闭环 Full Cycle', () => {
   let appealReason: string
 
   test('前置：完成完整考核流程并发布结果', async ({ page }) => {
-    const adminToken = await getToken(page, 'admin', 'admin123')
+    const adminToken = await getToken(page, 'admin', TEST_CREDENTIALS.admin)
     cycleName = `APPEAL-CYCLE-${Date.now()}`
     const cycle = await createCycleViaApi(page, adminToken, cycleName)
     cycleId = cycle.id
@@ -560,7 +597,7 @@ test.describe.serial('申诉闭环 Full Cycle', () => {
     if (!employee || !mgr || !peer) throw new Error('Required employees not found')
     employeeId = employee.id
 
-    const hrToken = await getToken(page, 'hr001', 'admin123')
+    const hrToken = await getToken(page, 'hr001', TEST_CREDENTIALS.hr001)
     await launchCycleViaApi(page, hrToken, cycleId, [employeeId])
 
     const summary = await getScoreSummaryViaApi(page, hrToken, cycleId)
@@ -571,20 +608,21 @@ test.describe.serial('申诉闭环 Full Cycle', () => {
     await assignPeerReviewerViaApi(page, hrToken, cycleId, employeeId, peer.id)
 
     // 自评
-    const empToken = await getToken(page, 'emp001', 'admin123')
+    const empToken = await getToken(page, 'emp001', TEST_CREDENTIALS.emp001)
     await submitSelfScoreViaApi(page, empToken, recordId, { performance: 85, ability: 80, attitude: 90 })
 
     // 经理评分
-    const mgrToken = await getToken(page, 'mgr001', 'admin123')
+    const mgrToken = await getToken(page, 'mgr001', TEST_CREDENTIALS.mgr001)
     await submitManagerScoreViaApi(page, mgrToken, recordId, { performance: 88, ability: 82, attitude: 85 })
 
     // 协作评分
-    const peerToken = await getToken(page, 'peer001', 'admin123')
+    const peerToken = await getToken(page, 'peer001', TEST_CREDENTIALS.peer001)
     await submitPeerScoreViaApi(page, peerToken, recordId, 78)
 
     // 汇总 + 发布
     await calculateScoresViaApi(page, hrToken, cycleId)
     await advanceToInterviewViaApi(page, adminToken, cycleId)
+    await submitInterviewViaApi(page, mgrToken, recordId)
     await publishCycleViaApi(page, hrToken, cycleId)
   })
 
@@ -684,7 +722,7 @@ test.describe.serial('驳回后重新评分 Full Cycle', () => {
   let peerEmployeeId: number
 
   test('前置：完成流程到 pending_approval', async ({ page }) => {
-    const adminToken = await getToken(page, 'admin', 'admin123')
+    const adminToken = await getToken(page, 'admin', TEST_CREDENTIALS.admin)
     cycleName = `REJECT-CYCLE-${Date.now()}`
     const cycle = await createCycleViaApi(page, adminToken, cycleName)
     cycleId = cycle.id
@@ -700,7 +738,7 @@ test.describe.serial('驳回后重新评分 Full Cycle', () => {
     employeeId = employee.id
     peerEmployeeId = peer.id
 
-    const hrToken = await getToken(page, 'hr001', 'admin123')
+    const hrToken = await getToken(page, 'hr001', TEST_CREDENTIALS.hr001)
     await launchCycleViaApi(page, hrToken, cycleId, [employeeId])
 
     const summary = await getScoreSummaryViaApi(page, hrToken, cycleId)
@@ -711,15 +749,15 @@ test.describe.serial('驳回后重新评分 Full Cycle', () => {
     await assignPeerReviewerViaApi(page, hrToken, cycleId, employeeId, peerEmployeeId)
 
     // 员工自评
-    const empToken = await getToken(page, 'emp001', 'admin123')
+    const empToken = await getToken(page, 'emp001', TEST_CREDENTIALS.emp001)
     await submitSelfScoreViaApi(page, empToken, recordId, { performance: 85, ability: 80, attitude: 90 })
 
     // 经理评分
-    const mgrToken = await getToken(page, 'mgr001', 'admin123')
+    const mgrToken = await getToken(page, 'mgr001', TEST_CREDENTIALS.mgr001)
     await submitManagerScoreViaApi(page, mgrToken, recordId, { performance: 88, ability: 82, attitude: 85 })
 
     // 协作评分
-    const peerToken = await getToken(page, 'peer001', 'admin123')
+    const peerToken = await getToken(page, 'peer001', TEST_CREDENTIALS.peer001)
     await submitPeerScoreViaApi(page, peerToken, recordId, 78)
 
     // 汇总 + 推进到 pending_approval
@@ -788,8 +826,8 @@ test.describe.serial('驳回后重新评分 Full Cycle', () => {
 
   test('重新汇总并再次审批通过', async ({ page }) => {
     // 通过 API 重新完成汇总和审批前置流程
-    const adminToken = await getToken(page, 'admin', 'admin123')
-    const hrToken = await getToken(page, 'hr001', 'admin123')
+    const adminToken = await getToken(page, 'admin', TEST_CREDENTIALS.admin)
+    const hrToken = await getToken(page, 'hr001', TEST_CREDENTIALS.hr001)
     await calculateScoresViaApi(page, hrToken, cycleId)
     await advanceToInterviewViaApi(page, adminToken, cycleId)
     await advanceToApprovalViaApi(page, adminToken, cycleId)
@@ -809,6 +847,10 @@ test.describe.serial('驳回后重新评分 Full Cycle', () => {
 
     // 断言审批通过
     await expect(page.getByText('审批通过').first()).toBeVisible()
+
+    // 面谈是发布前的强制节点：审批通过后补充面谈记录，便于下一个用例发布
+    const mgrToken = await getToken(page, 'mgr001', TEST_CREDENTIALS.mgr001)
+    await submitInterviewViaApi(page, mgrToken, recordId)
   })
 
   test('HR 发布结果', async ({ page }) => {
@@ -860,7 +902,7 @@ test.describe.serial('强制分布特批闭环 Full Cycle', () => {
   let mgrId: number
 
   test('Step 0: 前置数据准备（创建强制分布周期并发起考核）', async ({ page }) => {
-    const adminToken = await getToken(page, 'admin', 'admin123')
+    const adminToken = await getToken(page, 'admin', TEST_CREDENTIALS.admin)
     cycleName = `E2E-4-强制分布-${Date.now()}`
     const cycle = await createCycleWithRatioLimitsViaApi(page, adminToken, cycleName)
     cycleId = cycle.id
@@ -877,7 +919,7 @@ test.describe.serial('强制分布特批闭环 Full Cycle', () => {
     // 设置审批链为单级，避免多级审批阻塞
     await setApprovalChainViaApi(page, adminToken, ['direct_manager'])
 
-    const hrToken = await getToken(page, 'hr001', 'admin123')
+    const hrToken = await getToken(page, 'hr001', TEST_CREDENTIALS.hr001)
     await launchCycleViaApi(page, hrToken, cycleId, [employeeId])
 
     // 分配协作人
@@ -984,7 +1026,7 @@ test.describe.serial('强制分布特批闭环 Full Cycle', () => {
   })
 
   test('Step 4: HR 汇总计算（触发强制分布降级）', async ({ page }) => {
-    const hrToken = await getToken(page, 'hr001', 'admin123')
+    const hrToken = await getToken(page, 'hr001', TEST_CREDENTIALS.hr001)
     await calculateScoresViaApi(page, hrToken, cycleId)
 
     const summary = await getScoreSummaryViaApi(page, hrToken, cycleId)
@@ -997,7 +1039,7 @@ test.describe.serial('强制分布特批闭环 Full Cycle', () => {
   })
 
   test('Step 5: 经理申请特批', async ({ page }) => {
-    const mgrToken = await getToken(page, 'mgr001', 'admin123')
+    const mgrToken = await getToken(page, 'mgr001', TEST_CREDENTIALS.mgr001)
     const overrideReason = `员工表现优异，应获得A等级-${Date.now()}`
     await requestDistributionOverrideViaApi(page, mgrToken, recordId, overrideReason)
   })
@@ -1035,7 +1077,7 @@ test.describe.serial('强制分布特批闭环 Full Cycle', () => {
   })
 
   test('Step 7: 推进到面谈阶段', async ({ page }) => {
-    const hrToken = await getToken(page, 'hr001', 'admin123')
+    const hrToken = await getToken(page, 'hr001', TEST_CREDENTIALS.hr001)
     await advanceToInterviewViaApi(page, hrToken, cycleId)
   })
 
@@ -1071,7 +1113,7 @@ test.describe.serial('强制分布特批闭环 Full Cycle', () => {
 
   test('Step 9: 经理审批通过', async ({ page }) => {
     // 记录面谈后状态可能不是 pending_approval，需要通过 API 推进
-    const adminToken = await getToken(page, 'admin', 'admin123')
+    const adminToken = await getToken(page, 'admin', TEST_CREDENTIALS.admin)
     await advanceToApprovalViaApi(page, adminToken, cycleId)
 
     await managerLogin(page)
@@ -1132,7 +1174,7 @@ test.describe.serial('评分差异确认对话框 Full Cycle', () => {
   let employeeId: number
 
   test('Step 0: 前置数据准备', async ({ page }) => {
-    const adminToken = await getToken(page, 'admin', 'admin123')
+    const adminToken = await getToken(page, 'admin', TEST_CREDENTIALS.admin)
     cycleName = `E2E-5-差异确认-${Date.now()}`
     const cycle = await createCycleViaApi(page, adminToken, cycleName)
     cycleId = cycle.id
@@ -1142,7 +1184,7 @@ test.describe.serial('评分差异确认对话框 Full Cycle', () => {
     if (!employee) throw new Error('Required employee not found')
     employeeId = employee.id
 
-    const hrToken = await getToken(page, 'hr001', 'admin123')
+    const hrToken = await getToken(page, 'hr001', TEST_CREDENTIALS.hr001)
     await launchCycleViaApi(page, hrToken, cycleId, [employeeId])
 
     const summary = await getScoreSummaryViaApi(page, hrToken, cycleId)
