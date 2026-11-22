@@ -2,6 +2,21 @@ from pydantic import BaseModel, Field, field_validator, model_validator, Validat
 from typing import Optional, List, Dict, Any
 from decimal import Decimal
 from datetime import date, datetime
+import re
+
+# 职级取值约束：前端员工下拉为 P1-P5 / M1-M3，岗位为手工输入（占位符 "P5, M3"）。
+# 统一约束为「P/M + 1~2 位数字」，兼容未来新增 P6/P7；空串归一化为 None。
+_LEVEL_PATTERN = re.compile(r"^[PM][1-9]\d?$")
+
+def _normalize_level(value):
+    if value is None:
+        return None
+    text = str(value).strip().upper()
+    if not text:
+        return None
+    if not _LEVEL_PATTERN.match(text):
+        raise ValueError(f"职级格式不合法：{value}，应为 P1-P99 或 M1-M99")
+    return text
 
 # ------------------ Common ------------------
 class StandardResponse(BaseModel):
@@ -55,15 +70,28 @@ class DepartmentOut(BaseModel):
 # ------------------ Position ------------------
 class PositionCreate(BaseModel):
     name: str
+    level: Optional[str] = None
     department_id: Optional[int] = None
+
+    @field_validator("level")
+    @classmethod
+    def check_level(cls, v):
+        return _normalize_level(v)
 
 class PositionUpdate(BaseModel):
     name: Optional[str] = None
+    level: Optional[str] = None
     department_id: Optional[int] = None
+
+    @field_validator("level")
+    @classmethod
+    def check_level(cls, v):
+        return _normalize_level(v)
 
 class PositionOut(BaseModel):
     id: int
     name: str
+    level: Optional[str] = None
     department_id: Optional[int]
     created_at: Optional[datetime]
 
@@ -76,20 +104,32 @@ class EmployeeCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     department_id: Optional[int] = None
     position_id: Optional[int] = None
+    level: Optional[str] = None
     manager_id: Optional[int] = None
     manager_employee_no: Optional[str] = None
     is_department_head: Optional[bool] = False
     is_active: Optional[bool] = True
+
+    @field_validator("level")
+    @classmethod
+    def check_level(cls, v):
+        return _normalize_level(v)
 
 class EmployeeUpdate(BaseModel):
     employee_no: Optional[str] = None
     name: Optional[str] = None
     department_id: Optional[int] = None
     position_id: Optional[int] = None
+    level: Optional[str] = None
     manager_id: Optional[int] = None
     manager_employee_no: Optional[str] = None
     is_department_head: Optional[bool] = None
     is_active: Optional[bool] = None
+
+    @field_validator("level")
+    @classmethod
+    def check_level(cls, v):
+        return _normalize_level(v)
 
 class EmployeeOut(BaseModel):
     id: int
@@ -99,6 +139,7 @@ class EmployeeOut(BaseModel):
     department_name: Optional[str] = None
     position_id: Optional[int]
     position_name: Optional[str] = None
+    level: Optional[str] = None
     manager_id: Optional[int]
     manager_name: Optional[str] = None
     manager_employee_no: Optional[str] = None

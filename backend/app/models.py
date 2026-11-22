@@ -21,6 +21,8 @@ class Position(Base):
     __tablename__ = "positions"
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     name = Column(String(100), nullable=False)
+    # 职级（如 P5、M3），前端岗位表单已在用；直接建档的脚本/测试可为空
+    level = Column(String(20), nullable=True)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -35,6 +37,8 @@ class Employee(Base):
     name = Column(String(100), nullable=False)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
     position_id = Column(Integer, ForeignKey("positions.id"), nullable=True)
+    # 职级（前端员工表单必填），用于展示与按职级筛选；本身不参与评分计算
+    level = Column(String(20), nullable=True)
     manager_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     is_department_head = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)

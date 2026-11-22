@@ -296,6 +296,7 @@ def list_employees(
             "department_name": dept_name,
             "position_id": emp.position_id,
             "position_name": pos_name,
+            "level": emp.level,
             "manager_id": emp.manager_id,
             "manager_name": mgr_name,
             "manager_employee_no": mgr_emp_no,
@@ -350,6 +351,7 @@ def get_peer_candidates(
             "department_name": dept.name if dept else None,
             "position_id": emp.position_id,
             "position_name": pos.name if pos else None,
+            "level": emp.level,
         })
     return results
 
@@ -392,6 +394,7 @@ def get_employee(
         "department_name": emp.department.name if emp.department else None,
         "position_id": emp.position_id,
         "position_name": emp.position.name if emp.position else None,
+        "level": emp.level,
         "manager_id": emp.manager_id,
         "manager_name": emp.manager.name if emp.manager else None,
         "manager_employee_no": emp.manager.employee_no if emp.manager else None,
@@ -427,6 +430,7 @@ def get_subordinates(
             "department_name": sub.department.name if sub.department else None,
             "position_id": sub.position_id,
             "position_name": sub.position.name if sub.position else None,
+            "level": sub.level,
             "is_active": sub.is_active,
             "created_at": sub.created_at.isoformat() if sub.created_at else None,
         })
@@ -517,6 +521,7 @@ def create_employee(
         name=req.name,
         department_id=req.department_id,
         position_id=req.position_id,
+        level=req.level,
         manager_id=manager_id,
         is_department_head=req.is_department_head,
         is_active=req.is_active,
@@ -542,6 +547,7 @@ def create_employee(
         "department_name": emp.department.name if emp.department else None,
         "position_id": emp.position_id,
         "position_name": emp.position.name if emp.position else None,
+        "level": emp.level,
         "manager_id": emp.manager_id,
         "manager_name": emp.manager.name if emp.manager else None,
         "manager_employee_no": emp.manager.employee_no if emp.manager else None,
@@ -620,6 +626,7 @@ def update_employee(
         "department_name": emp.department.name if emp.department else None,
         "position_id": emp.position_id,
         "position_name": emp.position.name if emp.position else None,
+        "level": emp.level,
         "manager_id": emp.manager_id,
         "manager_name": emp.manager.name if emp.manager else None,
         "manager_employee_no": emp.manager.employee_no if emp.manager else None,

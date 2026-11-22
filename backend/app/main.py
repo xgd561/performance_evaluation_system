@@ -95,32 +95,62 @@ app.include_router(direct_api)
 
 
 def _migrate_db():
-    """SQLite 简单迁移：为已有表添加新列（如果不存在）"""
-    from sqlalchemy import inspect, text
-    from app.database import engine
-    inspector = inspect(engine)
-    columns = [c['name'] for c in inspector.get_columns('assessment_records')]
-    if 'manager_draft_scores' not in columns:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE assessment_records ADD COLUMN manager_draft_scores TEXT"))
-            conn.commit()
-            print("[migrate] Added column manager_draft_scores to assessment_records")
-    if 'self_draft_scores' not in columns:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE assessment_records ADD COLUMN self_draft_scores TEXT"))
-            conn.commit()
-            print("[migrate] Added column self_draft_scores to assessment_records")
-    if 'peer_draft_scores' not in columns:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE assessment_records ADD COLUMN peer_draft_scores TEXT"))
-            conn.commit()
-            print("[migrate] Added column peer_draft_scores to assessment_records")
+    """模型驱动的 SQLite 增量迁移。
 
-    if 'manager_submitted' not in columns:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE assessment_records ADD COLUMN manager_submitted BOOLEAN DEFAULT 0"))
-            conn.commit()
-            print("[migrate] Added column manager_submitted to assessment_records")
+    对比 SQLAlchemy 元数据与实际库表结构，为已存在的表自动补齐缺失列，
+    避免每新增一个字段都要在本函数里手写一条 ALTER TABLE。
+    SQLite 限制：ADD COLUMN 不能是 NOT NULL 且无默认值，这类列会跳过并打印告警。
+    """
+    from sqlalchemy import inspect, text
+    from sqlalchemy.schema import ColumnDefault
+    from app.database import engine
+    from app.models import Base
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    def _type_sql(column):
+        try:
+            return column.type.compile(dialect=engine.dialect)
+        except Exception:
+            return "TEXT"
+
+    def _default_sql(column):
+        """只有标量默认值可以内联到 ADD COLUMN 中。"""
+        default = column.default
+        if default is None or not isinstance(default, ColumnDefault):
+            return ""
+        if getattr(default, "is_scalar", False) is False:
+            return ""
+        value = default.arg
+        if isinstance(value, bool):
+            return f" DEFAULT {1 if value else 0}"
+        if isinstance(value, (int, float)):
+            return f" DEFAULT {value}"
+        if isinstance(value, str):
+            return " DEFAULT '" + value.replace("'", "''") + "'"
+        return ""
+
+    added = 0
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if table.name not in existing_tables:
+                continue  # 新建表由 create_all 负责
+            existing_columns = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing_columns:
+                    continue
+                default_sql = _default_sql(column)
+                if not column.nullable and not default_sql:
+                    print(f"[migrate] skip {table.name}.{column.name}: NOT NULL 且无标量默认值，需人工处理")
+                    continue
+                ddl = f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {_type_sql(column)}{default_sql}'
+                conn.execute(text(ddl))
+                added += 1
+                print(f"[migrate] Added column {table.name}.{column.name}")
+
+    if added == 0:
+        print("[migrate] schema up to date")
 
 
 @app.on_event("startup")
