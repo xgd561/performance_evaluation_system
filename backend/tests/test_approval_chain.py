@@ -149,7 +149,22 @@ class TestApprovalChain:
         items = resp.json()
         assert any(i["record_id"] == record.id for i in items)
 
-        # HR should also see it (HR sees all pending_approval records)
+        # HR 只在轮到 hr_head（第 3 步）时可见，不允许越级
+        # 先补齐前两步审批把记录推进到 hr_head，再校验 HR 能看到
+        db_session.add_all([
+            ApprovalRecord(
+                record_id=record.id, approver_id=mgr_emp.id,
+                approver_role="direct_manager", step_index=1,
+                action="approved", approval_type="normal",
+            ),
+            ApprovalRecord(
+                record_id=record.id, approver_id=mgr_emp.id,
+                approver_role="dept_head", step_index=2,
+                action="approved", approval_type="normal",
+            ),
+        ])
+        db_session.commit()
+
         resp = client.post("/auth/login", json={"username": "hr001", "password": "Hr001@123"})
         hr_token = resp.json()["access_token"]
 

@@ -160,8 +160,24 @@ class TestP5_17Approval:
         self._ensure_approval_chain(db_session)
         db_session.commit()
 
-        # 默认审批链 ["direct_manager", "dept_head", "hr_head"] 有3步，step_index=0 对应 step=1
-        # HR 角色在 step_idx=0,1,2 时都可以审批，因此能看到所有 pending_approval 且任一 step 的记录
+        # 默认审批链 ["direct_manager", "dept_head", "hr_head"] 共 3 步；
+        # HR 只在轮到 hr_head（第 3 步）时可见（P1-23 不允许越级），
+        # 因此先把两条记录都推进到第 3 步，再校验 HR 能看到全部记录
+        for rec in (record_a, record_b):
+            db_session.add_all([
+                ApprovalRecord(
+                    record_id=rec.id, approver_id=mgr_a.id,
+                    approver_role="direct_manager", step_index=1,
+                    action="approved", approval_type="normal",
+                ),
+                ApprovalRecord(
+                    record_id=rec.id, approver_id=mgr_a.id,
+                    approver_role="dept_head", step_index=2,
+                    action="approved", approval_type="normal",
+                ),
+            ])
+        db_session.commit()
+
         token = self._login(client, "p517_hr", "Test@123")
         resp = client.get("/approvals/pending", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200

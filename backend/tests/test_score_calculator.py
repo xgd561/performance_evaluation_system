@@ -30,12 +30,12 @@ class TestCalculateWeightedScore:
 
         # performance = 82*0.3 + 85*0.7 = 84.1
         assert result["weighted_performance"] == 84.1
-        # ability = 84*0.3 + 88*0.5 + 86*0.2 = 86.0
-        assert result["weighted_ability"] == 86.0
+        # ability = 84*0.3 + 88*0.5 + 86*0.2 = 86.4
+        assert result["weighted_ability"] == 86.4
         # attitude = 88*0.3 + 90*0.7 = 89.4
         assert result["weighted_attitude"] == 89.4
-        # total = 84.1*0.5 + 86.0*0.3 + 89.4*0.2 = 86.03
-        assert result["total_score"] == 86.0
+        # total = 84.1*0.5 + 86.4*0.3 + 89.4*0.2 = 85.85 → 四舍五入保留 1 位 = 85.9
+        assert result["total_score"] == 85.9
 
     def test_no_peer_scores(self):
         """无协作评分时，performance 和 attitude 正常计算，ability 仅自评+上级"""
@@ -78,8 +78,8 @@ class TestCalculateWeightedScore:
         assert result["weighted_performance"] == 80.49
         assert result["weighted_ability"] == 86.66
         assert result["weighted_attitude"] == 93.67
-        # 总分保留 1 位
-        assert result["total_score"] == 86.5
+        # 总分 = 80.49*0.4 + 86.66*0.35 + 93.67*0.25 = 85.9445 → 保留 1 位 = 85.9
+        assert result["total_score"] == 85.9
 
     def test_kpi_weighted_performance_override(self):
         """KPI 加权 performance 覆盖原始 performance"""
@@ -100,7 +100,9 @@ class TestCalculateWeightedScore:
         )
 
         assert result["weighted_performance"] == 90.95
-        assert result["total_score"] == 89.1
+        # ability = 84*0.3 + 88*0.7 = 86.8，attitude = 88*0.3 + 90*0.7 = 89.4
+        # total = 90.95*0.5 + 86.8*0.3 + 89.4*0.2 = 89.395 → 保留 1 位 = 89.4
+        assert result["total_score"] == 89.4
 
     def test_empty_scores(self):
         """空评分数据返回 0 分"""

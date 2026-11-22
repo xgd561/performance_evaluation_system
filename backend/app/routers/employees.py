@@ -460,6 +460,15 @@ def get_all_dept_ids(db: Session, department_id: int, visited: set = None) -> se
     return dept_ids
 
 
+def get_descendant_dept_ids(db: Session, department_id: int) -> set:
+    """只收集下级部门 ID，不含该部门自身。
+
+    细粒度查询（个人趋势、面谈、考核详情）要求「同部门非下属不可见、
+    下级部门成员可见」，因此这里排除本部门；列表类接口仍用 get_all_dept_ids。
+    """
+    return get_all_dept_ids(db, department_id) - {department_id}
+
+
 def _is_in_subordinate_chain(db: Session, manager_id: int, target_id: int) -> bool:
     """Check if target_id is a direct or indirect subordinate of manager_id."""
     if manager_id == target_id:

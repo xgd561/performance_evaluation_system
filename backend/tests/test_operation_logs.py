@@ -20,14 +20,14 @@ class TestOperationLogs:
         cycle = AssessmentCycle(
             name="测试周期", type="季度",
             start_date=date(2026, 1, 1), end_date=date(2026, 3, 31),
-            status="pending_manager",
+            status="pending_approval",
         )
         db_session.add(cycle)
         db_session.flush()
 
         record = AssessmentRecord(
             cycle_id=cycle.id, employee_id=emp.id,
-            status="pending_manager",
+            status="pending_approval",
         )
         db_session.add(record)
         db_session.commit()

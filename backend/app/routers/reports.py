@@ -6,7 +6,7 @@ import json
 from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import User, AssessmentCycle, AssessmentRecord, Employee, Department
-from app.routers.employees import _is_in_subordinate_chain, get_all_dept_ids
+from app.routers.employees import _is_in_subordinate_chain, get_all_dept_ids, get_descendant_dept_ids
 from fastapi.responses import StreamingResponse
 from app.utils.pdf_generator import generate_performance_pdf
 from io import BytesIO
@@ -231,12 +231,16 @@ def get_employee_trend(
         current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
         if not current_employee:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
+        # 本人、下属链、下级部门成员可见；同部门非下属不属授权范围
         target_employee = db.query(Employee).filter(Employee.id == employee_id).first()
-        dept_ids = get_all_dept_ids(db, current_employee.department_id)
         allowed = (
             current_employee.id == employee_id
             or _is_in_subordinate_chain(db, current_employee.id, employee_id)
-            or (target_employee and target_employee.department_id in dept_ids)
+            or (
+                target_employee is not None
+                and target_employee.department_id
+                in get_descendant_dept_ids(db, current_employee.department_id)
+            )
         )
         if not allowed:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")

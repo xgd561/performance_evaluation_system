@@ -1,4 +1,15 @@
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Any, Optional
+
+
+def _round_half_up(value: float, digits: int) -> float:
+    """按四舍五入保留小数位。
+
+    round() 用的是 bankers rounding 且叠加浮点误差，85.85 会得到 85.8；
+    评分保留小数位属于业务口径，这里统一用 Decimal 四舍五入。
+    """
+    quant = Decimal("1").scaleb(-digits)
+    return float(Decimal(str(value)).quantize(quant, rounding=ROUND_HALF_UP))
 
 
 def calculate_weighted_score(
@@ -66,15 +77,21 @@ def calculate_weighted_score(
             weighted_sum = weighted_sum / total_w
 
         # 中间结果保留 2 位小数
-        weighted_dims[dim] = round(weighted_sum, 2)
+        weighted_dims[dim] = _round_half_up(weighted_sum, 2)
 
     dim_weight_factor = 100.0 if sum(dim_weights.values()) > 1 else 1.0
+    # 总分需用 Decimal 累加：维度得分已是 2 位小数，用浮点累加会引入
+    # 85.84999999999999 这类误差，导致边界值（如 85.85）舍入方向错
     total = sum(
-        weighted_dims.get(d, 0) * (dim_weights.get(d, 0) / dim_weight_factor)
-        for d in dim_weights
+        (
+            Decimal(str(weighted_dims.get(d, 0)))
+            * (Decimal(str(dim_weights.get(d, 0))) / Decimal(str(dim_weight_factor)))
+            for d in dim_weights
+        ),
+        Decimal("0"),
     )
     # 最终总分保留 1 位小数
-    total = round(total, 1)
+    total = float(total.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
 
     return {
         "weighted_performance": weighted_dims.get("performance", 0),

@@ -13,7 +13,7 @@ from app.models import (
     AssessmentCycle
 )
 
-from app.routers.employees import _is_in_subordinate_chain, get_all_dept_ids
+from app.routers.employees import _is_in_subordinate_chain, get_descendant_dept_ids
 from app.utils.workflow_state_machine import WorkflowStateMachine
 from app.routers.archive_guard import check_record_not_archived
 from app.services.notification_service import create_notification
@@ -164,11 +164,11 @@ def get_interview(
         current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
         if not current_employee:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
-        dept_ids = get_all_dept_ids(db, current_employee.department_id)
+        # 本人、下属链、下级部门成员可见；同部门非下属不属授权范围
         allowed = (
             current_employee.id == record.employee_id
             or _is_in_subordinate_chain(db, current_employee.id, record.employee_id)
-            or record.department_id in dept_ids
+            or record.department_id in get_descendant_dept_ids(db, current_employee.department_id)
         )
         if not allowed:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
@@ -256,12 +256,16 @@ def get_employee_interview_history(
         current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
         if not current_employee:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
+        # 本人、下属链、下级部门成员可见；同部门非下属不属授权范围
         target_employee = db.query(Employee).filter(Employee.id == employee_id).first()
-        dept_ids = get_all_dept_ids(db, current_employee.department_id)
         allowed = (
             current_employee.id == employee_id
             or _is_in_subordinate_chain(db, current_employee.id, employee_id)
-            or (target_employee and target_employee.department_id in dept_ids)
+            or (
+                target_employee is not None
+                and target_employee.department_id
+                in get_descendant_dept_ids(db, current_employee.department_id)
+            )
         )
         if not allowed:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")

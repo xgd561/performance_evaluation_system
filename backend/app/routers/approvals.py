@@ -204,9 +204,17 @@ def get_pending_approvals(
                 )
             )
         elif role in ("hr_head", "hr") and user.role in ("hr", "admin"):
-            conditions.append(
-                AssessmentRecord.status == "pending_approval"
-            )
+            if user.role == "admin":
+                # 管理员可代任何步骤处理
+                conditions.append(AssessmentRecord.status == "pending_approval")
+            else:
+                # HR 只在轮到 hr_head 步骤时可见，避免提前看到前序步骤的记录
+                conditions.append(
+                    and_(
+                        AssessmentRecord.status == "pending_approval",
+                        func.coalesce(step_counts.c.max_step, 0) == step_idx,
+                    )
+                )
         elif role == "admin" and user.role == "admin":
             conditions.append(
                 AssessmentRecord.status == "pending_approval"
@@ -512,12 +520,10 @@ def approve_record(
 
     # Use WorkflowStateMachine to determine new status
     action_name = "approve_step1" if current_step + 1 < len(chain) else "approve_step2"
+    # 状态机日志不重复落库：本接口末尾会写一条业务语义的 approve 日志
     new_status = WorkflowStateMachine.transition(
         current_state="pending_approval",
         action=action_name,
-        db=db,
-        user_id=user.id,
-        target_id=record_id,
     )
     record.status = new_status
 

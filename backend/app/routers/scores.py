@@ -15,7 +15,11 @@ from app.services.distribution_enforcer import enforce_distribution
 from app.services.score_calculator import calculate_weighted_score, calculate_kpi_weighted_performance
 from app.services.notification_service import create_notification
 from app.utils.workflow_state_machine import WorkflowStateMachine
-from app.routers.employees import _is_in_subordinate_chain, get_all_dept_ids
+from app.routers.employees import (
+    _is_in_subordinate_chain,
+    get_all_dept_ids,
+    get_descendant_dept_ids,
+)
 from app.routers.archive_guard import check_record_not_archived, check_cycle_not_archived
 
 from app.utils.json_columns import load_json
@@ -340,8 +344,6 @@ def calculate_scores(
 
 from pydantic import BaseModel
 from typing import Optional, List, Any
-
-from app.services.operation_logger import log_operation
 
 
 class ManagerScoreSubmit(BaseModel):
@@ -784,13 +786,20 @@ def submit_self_score(
     old_status = record.status
     record.self_scores = self_scores
     # 使用状态机执行转换: pending_self -> submit_self -> pending_manager
+    # 状态机日志不重复落库：下方写一条业务语义的 self_score_submit 日志
     record.status = WorkflowStateMachine.transition(
         current_state=old_status,
         action="submit_self",
+    )
+
+    log_operation(
         db=db,
         user_id=user.id,
-        target_id=record_id,
+        action="self_score_submit",
         target_type="assessment_record",
+        target_id=record_id,
+        old_value={"status": old_status},
+        new_value={"status": record.status, "self_scores": self_scores},
     )
 
     db.commit()
@@ -1039,11 +1048,12 @@ def get_assessment_record_detail(
         current_employee = db.query(Employee).filter(Employee.id == user.employee_id).first()
         if not current_employee:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
-        dept_ids = get_all_dept_ids(db, current_employee.department_id)
+        # 本人、下属链、下级部门成员可见；同部门非下属不属授权范围
         allowed = (
             current_employee.id == record.employee_id
             or _is_in_subordinate_chain(db, current_employee.id, record.employee_id)
-            or (record.department_id in dept_ids)
+            or record.department_id
+            in get_descendant_dept_ids(db, current_employee.department_id)
         )
         if not allowed:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问")
