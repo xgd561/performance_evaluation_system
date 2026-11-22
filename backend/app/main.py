@@ -22,8 +22,11 @@ app.add_middleware(
 
 from app.utils.audit_logger import AuditLogMiddleware
 from app.core.exceptions import register_exception_handlers
+from app.core.response import UnifiedResponseMiddleware
 
 app.add_middleware(AuditLogMiddleware)
+# 成功响应统一包装为 {code, message, data}；错误响应保持原 HTTP 状态码
+app.add_middleware(UnifiedResponseMiddleware)
 
 register_exception_handlers(app)
 
@@ -32,7 +35,7 @@ register_exception_handlers(app)
 async def http_exception_handler(request: Request, exc: HTTPException):
     return JSONResponse(
         status_code=exc.status_code,
-        content={"code": exc.status_code, "message": exc.detail},
+        content={"code": exc.status_code, "message": exc.detail, "data": None},
     )
 
 
@@ -42,7 +45,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     message = "; ".join([f"{e['loc']}: {e['msg']}" for e in errors])
     return JSONResponse(
         status_code=422,
-        content={"code": 422, "message": message},
+        content={"code": 422, "message": message, "data": None},
     )
 
 

@@ -20,6 +20,29 @@ from app.database import get_db, Base
 from app.models import User, Employee, Department, Position
 from app.auth import get_password_hash, create_access_token
 
+# --- 统一响应的测试适配 -----------------------------------------------------
+# 后端成功响应已统一包装为 {code, message, data}（见 app/core/response.py），
+# 而测试断言习惯直接取业务字段（resp.json()["id"]）。
+# 这里在测试进程内给 httpx.Response.json 加一层解包，做到适配一处、930+ 断言零改动。
+# 需要断言原始信封结构的用例，请读 resp.content / resp.text 自行 json.loads，
+# 参见 tests/test_unified_response.py。
+import httpx
+
+_RAW_JSON = httpx.Response.json
+
+
+def _unwrapped_json(self, **kwargs):
+    payload = _RAW_JSON(self, **kwargs)
+    if 200 <= self.status_code < 300 and isinstance(payload, dict):
+        if {"code", "message", "data"}.issubset(payload.keys()) and isinstance(payload.get("code"), int):
+            return payload["data"]
+    return payload
+
+
+if not getattr(httpx.Response.json, "_unified_unwrap", False):
+    _unwrapped_json._unified_unwrap = True
+    httpx.Response.json = _unwrapped_json
+
 # Use file-based SQLite for tests (shared across connections)
 _db_file = tempfile.mktemp(suffix='.db')
 TEST_DATABASE_URL = f"sqlite:///{_db_file}"

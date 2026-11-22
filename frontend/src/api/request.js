@@ -3,6 +3,18 @@ import { ElMessage } from 'element-plus'
 
 const BASE_URL = import.meta.env?.VITE_API_BASE_URL || '/api/v1'
 
+// 判断响应体是否为后端统一响应信封 { code, message, data }
+function isEnvelope(payload) {
+  return (
+    payload !== null &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    typeof payload.code === 'number' &&
+    typeof payload.message === 'string' &&
+    Object.prototype.hasOwnProperty.call(payload, 'data')
+  )
+}
+
 const request = axios.create({
   baseURL: BASE_URL,
   timeout: 10000,
@@ -54,7 +66,18 @@ request.interceptors.response.use(
       )
     }
     const data = response.data
-    if (typeof data.code === 'number' && data.code !== 0 && data.code !== 200) {
+
+    // 后端成功响应统一为 { code, message, data }，这里解包出业务数据，
+    // 视图层仍按 res.xxx 取值；未包装的旧接口（如健康检查）原样返回。
+    if (isEnvelope(data)) {
+      if (data.code !== 0 && data.code !== 200) {
+        ElMessage.error(data.message || '请求失败')
+        return Promise.reject(new Error(data.message || '请求失败'))
+      }
+      return data.data
+    }
+
+    if (typeof data?.code === 'number' && data.code !== 0 && data.code !== 200) {
       ElMessage.error(data.message || '请求失败')
       return Promise.reject(new Error(data.message || '请求失败'))
     }
@@ -66,7 +89,7 @@ request.interceptors.response.use(
 
     if (response) {
       const status = response.status
-      msg = response.data?.message || error.message || `HTTP ${status}`
+      msg = response.data?.message || response.data?.detail || error.message || `HTTP ${status}`
 
       if (status === 401) {
         localStorage.removeItem('pes_access_token')
