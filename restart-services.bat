@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal enabledelayedexpansion
 
 :: 配置
-set BACKEND_PORT=8014
+set BACKEND_PORT=8000
 set FRONTEND_PORT=3000
 set BACKEND_DIR=D:\cc_project\performance_evaluation_system\backend
 set FRONTEND_DIR=D:\cc_project\performance_evaluation_system\frontend

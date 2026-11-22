@@ -2,7 +2,7 @@
 
 > 来源：PRD_绩效考核评分系统_v1.0.md 角色使用场景
 > 框架：Playwright + Chromium
-> 环境前提：后端 `http://localhost:8014` + 前端 `http://localhost:3000`
+> 环境前提：后端 `http://localhost:8000` + 前端 `http://localhost:3000`
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## 二、通用前置条件
 
-1. 后端服务已启动（`uvicorn app.main:app --port 8014`）。
+1. 后端服务已启动（`uvicorn app.main:app --port 8000`）。
 2. 数据库中已存在基础种子数据（员工、部门、岗位、考核周期）。
 3. 前端 Dev Server 由 Playwright `webServer` 自动启动。
 

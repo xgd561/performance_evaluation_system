@@ -235,7 +235,7 @@ cd frontend && npm run dev
 - `app/routers/approvals.py` 的 `get_pending_approvals` 已改为 SQL 预过滤（P1-23），避免全表遍历
 - `app/routers/dashboard.py` 的统计已按角色隔离（P1-21），管理员/HR 看全局，经理看团队，员工只看自己
 - `app/routers/scores.py` 的加权计算逻辑：当存在 KPI 快照时，业绩维度得分由 KPI 得分替代；经理与自评差异超过 20 分时会标记异常
-- `frontend/vite.config.js` 的代理目标端口是 `8014`（与 `restart-services.bat` 一致），不是 `8000`
+- `frontend/vite.config.js` 的代理目标端口是 `8000`（与 `restart-services.bat`、`backend/restart.bat`、`scripts/restart.bat` 一致）
 - 前端 `request.js` 的响应拦截器**只将数字类型的 `code` 视为业务状态码**，避免字符串编码（如部门 `code`）被误判
 
 ## 端到端（E2E）测试
@@ -254,11 +254,11 @@ cd frontend && npm run dev
 
 运行 E2E 测试前，需确保以下服务已启动：
 
-1. **后端 API**（端口 8014）：
+1. **后端 API**（端口 8000）：
 
    ```bash
    cd backend
-   .venv\Scripts\python -m uvicorn app.main:app --host 0.0.0.0 --port 8014
+   .venv\Scripts\python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
    ```
 
 2. **前端 Dev Server**（端口 3000）：由 Playwright 的 `webServer` 配置自动启动，无需手动执行。
