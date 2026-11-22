@@ -79,7 +79,7 @@ class TestP6_05_Appeals:
         reason = "我认为本次绩效考核评分存在明显不公，自评分与上级评分差距过大，请求复核。"
         resp = client.post(
             "/appeals",
-            json={"record_id": record.id, "reason": reason, "detail": "详情说明"},
+            json={"record_id": record.id, "reason": reason, "detail": "自评与上级评分差距较大，评分依据不清晰，希望复核具体打分过程。"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 201, f"Expected 201, got {resp.status_code}: {resp.text}"
@@ -118,7 +118,7 @@ class TestP6_05_Appeals:
         reason = "我认为本次绩效考核评分存在明显不公，请求复核。"
         resp = client.post(
             "/appeals",
-            json={"record_id": record.id, "reason": reason},
+            json={"record_id": record.id, "reason": reason, "detail": "本次评分与等级核定结果与我的预期差距较大，申请复核评分依据与计算过程。"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 400
@@ -177,7 +177,7 @@ class TestP6_05_Appeals:
         reason = "我认为本次绩效考核评分存在明显不公，自评分与上级评分差距过大，请求复核。"
         resp = client.post(
             "/appeals",
-            json={"record_id": record.id, "reason": reason, "detail": "详细说明"},
+            json={"record_id": record.id, "reason": reason, "detail": "自评与上级评分差距较大，评分依据不清晰，希望复核具体打分过程。"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 201
@@ -188,7 +188,7 @@ class TestP6_05_Appeals:
         appeal_data = json.loads(record.appeal_record)
         assert appeal_data["status"] == "pending"
         assert appeal_data["reason"] == reason
-        assert appeal_data["detail"] == "详细说明"
+        assert appeal_data["detail"] == "自评与上级评分差距较大，评分依据不清晰，希望复核具体打分过程。"
         assert "appeal_id" in appeal_data
         assert "created_at" in appeal_data
 
@@ -209,7 +209,7 @@ class TestP6_05_Appeals:
         reason = "我认为本次绩效考核评分存在明显不公，自评分与上级评分差距过大，请求复核。"
         resp = client.post(
             "/appeals",
-            json={"record_id": record.id, "reason": reason},
+            json={"record_id": record.id, "reason": reason, "detail": "本次评分与等级核定结果与我的预期差距较大，申请复核评分依据与计算过程。"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 201
@@ -257,7 +257,7 @@ class TestP6_05_Appeals:
         reason = "我认为本次绩效考核评分存在明显不公，自评分与上级评分差距过大，请求复核。"
         resp = client.post(
             "/appeals",
-            json={"record_id": record.id, "reason": reason},
+            json={"record_id": record.id, "reason": reason, "detail": "本次评分与等级核定结果与我的预期差距较大，申请复核评分依据与计算过程。"},
             headers={"Authorization": f"Bearer {token}"},
         )
         # 实际行为：端点不验证记录归属，返回 201

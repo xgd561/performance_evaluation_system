@@ -55,6 +55,7 @@ class TestAppealIntegration:
         resp = client.post("/appeals", headers={"Authorization": f"Bearer {employee_token}"}, json={
             "record_id": record.id,
             "reason": "我认为我的绩效评定结果不符合预期，需要重新复核",
+            "detail": "本次评分与等级核定结果与我的预期差距较大，申请复核评分依据与计算过程。",
         })
         assert resp.status_code == 201
         appeal_id = resp.json()["id"]
@@ -91,6 +92,7 @@ class TestAppealIntegration:
         resp = client.post("/appeals", headers={"Authorization": f"Bearer {employee_token}"}, json={
             "record_id": record.id,
             "reason": "我认为我的绩效评定结果不符合预期，需要重新复核",
+            "detail": "本次评分与等级核定结果与我的预期差距较大，申请复核评分依据与计算过程。",
         })
         assert resp.status_code == 201
         appeal_id = resp.json()["id"]
@@ -131,6 +133,7 @@ class TestAppealIntegration:
         resp = client.post("/appeals", headers={"Authorization": f"Bearer {employee_token}"}, json={
             "record_id": record.id,
             "reason": "我认为我的绩效评定结果不符合预期，需要重新复核",
+            "detail": "本次评分与等级核定结果与我的预期差距较大，申请复核评分依据与计算过程。",
         })
         assert resp.status_code == 400
 
@@ -142,6 +145,7 @@ class TestAppealIntegration:
         resp = client.post("/appeals", headers={"Authorization": f"Bearer {employee_token}"}, json={
             "record_id": record.id,
             "reason": "我认为我的绩效评定结果不符合预期，需要重新复核",
+            "detail": "本次评分与等级核定结果与我的预期差距较大，申请复核评分依据与计算过程。",
         })
         appeal_id = resp.json()["id"]
         record.status = "appealed"
@@ -161,6 +165,7 @@ class TestAppealIntegration:
         resp = client.post("/appeals", headers={"Authorization": f"Bearer {employee_token}"}, json={
             "record_id": record.id,
             "reason": "我认为我的绩效评定结果不符合预期，需要重新复核",
+            "detail": "本次评分与等级核定结果与我的预期差距较大，申请复核评分依据与计算过程。",
         })
         appeal_id = resp.json()["id"]
 
@@ -190,6 +195,7 @@ class TestAppealIntegration:
         resp = client.post("/appeals", headers={"Authorization": f"Bearer {employee_token}"}, json={
             "record_id": record.id,
             "reason": "我认为我的绩效评定结果不符合预期，需要重新复核",
+            "detail": "本次评分与等级核定结果与我的预期差距较大，申请复核评分依据与计算过程。",
         })
         assert resp.status_code == 201
 

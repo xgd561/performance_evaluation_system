@@ -9,6 +9,7 @@ from app.database import get_db
 from app.auth import get_current_user, require_role
 from app.models import (
     AssessmentCycle, Employee, AssessmentRecord, CycleEmployee, KpiTemplate, Position, Department, User,
+    InterviewRecord,
 )
 from app.schemas import (
     AssessmentCycleCreate,
@@ -944,6 +945,29 @@ def publish_cycle(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"该周期尚有 {unfinished} 条考核记录未完成审批，无法发布",
+        )
+
+    # 面谈是发布前的强制节点：pending_interview 且无面谈记录的记录必须阻断发布
+    pending_records = db.query(AssessmentRecord).filter(
+        AssessmentRecord.cycle_id == cycle_id,
+        AssessmentRecord.status == "pending_interview",
+    ).all()
+    interviewed_ids = set()
+    if pending_records:
+        interviewed_ids = {
+            row[0]
+            for row in db.query(InterviewRecord.record_id).filter(
+                InterviewRecord.record_id.in_([r.id for r in pending_records])
+            ).all()
+        }
+    missing_interview = [
+        r for r in pending_records
+        if r.interview_record is None and r.id not in interviewed_ids
+    ]
+    if missing_interview:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"该周期尚有 {len(missing_interview)} 条考核记录未完成绩效面谈，无法发布",
         )
 
     # 批量将 pending_interview 记录改为 published

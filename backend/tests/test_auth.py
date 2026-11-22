@@ -44,13 +44,13 @@ class TestAuthLogin:
         resp = client.post("/auth/login", json={"username": ""})
         assert resp.status_code == 422
 
-    def test_login_first_login_user(self, client: TestClient, employee_user):
-        resp = client.post("/auth/login", json={"username": "emp001", "password": "Emp001@123"})
+    def test_login_first_login_user(self, client: TestClient, first_login_employee):
+        resp = client.post("/auth/login", json={"username": "fl001", "password": "Fl001@123"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["user"]["is_first_login"] is True
         assert data["user"]["role"] == "employee"
-        assert data["user"]["name"] == "王员工"
+        assert data["user"]["name"] == "首登员工"
 
     def test_login_remember_me(self, client: TestClient, admin_user):
         resp = client.post("/auth/login", json={"username": "admin", "password": "admin123", "remember_me": True})

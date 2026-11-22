@@ -213,19 +213,29 @@ def review_appeal(
     if action not in ("approve", "reject"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="action 必须是 approve 或 reject")
 
+    # 终审只允许一次：已处理（resolved/rejected）的申诉不可重复复核
+    if appeal.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"该申诉已完成终审（当前状态：{appeal.status}），不可重复复核",
+        )
+
     record = db.query(AssessmentRecord).filter(AssessmentRecord.id == appeal.record_id).first()
     old_values = {}
     if record:
         old_values = {
             "total_score": str(record.total_score) if record.total_score else None,
             "grade": record.grade,
+            "status": record.status,
         }
+
+    from datetime import datetime
+    resolved_at = datetime.utcnow()
 
     appeal.status = "resolved" if action == "approve" else "rejected"
     appeal.review_result = review_result
     appeal.reviewer_id = user.employee_id or user.id
-    from datetime import datetime
-    appeal.resolved_at = datetime.utcnow()
+    appeal.resolved_at = resolved_at
 
     # 如果复核通过且传入了新分数/等级，更新考核记录
     if action == "approve" and record:
@@ -234,8 +244,29 @@ def review_appeal(
         if new_grade is not None:
             record.grade = new_grade
 
+    # 终审即结束申诉：考核记录从 appealed 回写为 published，避免记录滞留在申诉中
+    if record and record.status == "appealed":
+        record.status = "published"
+        record.appeal_record = json.dumps({
+            "appeal_id": appeal.id,
+            "action": action,
+            "review_result": review_result,
+            "resolved_at": resolved_at.isoformat(),
+        }, ensure_ascii=False)
+
     db.commit()
     db.refresh(appeal)
+
+    # 通知申诉人复核结果
+    employee_user = db.query(User).filter(User.employee_id == appeal.employee_id).first()
+    if employee_user:
+        create_notification(
+            db=db,
+            user_id=employee_user.id,
+            title="申诉复核结果",
+            content=f"您的申诉已完成终审，结果：{'复核通过' if action == 'approve' else '复核驳回'}。{review_result or ''}",
+            type="appeal_resolved",
+        )
 
     log_operation(
         db=db,
@@ -250,6 +281,7 @@ def review_appeal(
             "review_result": review_result,
             "total_score": str(record.total_score) if record else None,
             "grade": record.grade if record else None,
+            "record_status": record.status if record else None,
         },
     )
 

@@ -183,11 +183,49 @@ def employee_user(db_session: Session):
             password_hash=get_password_hash("Emp001@123"),
             role="employee",
             employee_id=emp.id,
+            is_first_login=False,
+        )
+        db_session.add(user)
+        db_session.commit()
+    return user
+
+
+@pytest.fixture(scope="function")
+def first_login_employee(db_session: Session):
+    """Create an employee user still in first-login state (must change password)."""
+    dept = db_session.query(Department).filter(Department.code == "FIRST_LOGIN").first()
+    if not dept:
+        dept = Department(name="首登测试部", code="FIRST_LOGIN")
+        db_session.add(dept)
+        db_session.flush()
+    pos = db_session.query(Position).filter(Position.name == "首登测试岗", Position.department_id == dept.id).first()
+    if not pos:
+        pos = Position(name="首登测试岗", department_id=dept.id)
+        db_session.add(pos)
+        db_session.flush()
+    emp = db_session.query(Employee).filter(Employee.employee_no == "FL001").first()
+    if not emp:
+        emp = Employee(employee_no="FL001", name="首登员工", department_id=dept.id, position_id=pos.id)
+        db_session.add(emp)
+        db_session.flush()
+    user = db_session.query(User).filter(User.username == "fl001").first()
+    if not user:
+        user = User(
+            username="fl001",
+            password_hash=get_password_hash("Fl001@123"),
+            role="employee",
+            employee_id=emp.id,
             is_first_login=True,
         )
         db_session.add(user)
         db_session.commit()
     return user
+
+
+@pytest.fixture(scope="function")
+def first_login_token(first_login_employee):
+    """Get access token for a user who still needs to change the initial password."""
+    return create_access_token(data={"sub": first_login_employee.username})
 
 
 @pytest.fixture(scope="function")
@@ -211,8 +249,7 @@ def manager_token(manager_user):
 @pytest.fixture(scope="function")
 def employee_token(employee_user):
     """Get employee access token (generated directly to avoid rate limits)."""
-    # employee_user has is_first_login=True by default, which may block login.
-    # Direct token generation bypasses that check.
+    # employee_user 已完成首次改密；首登场景请使用 first_login_token
     return create_access_token(data={"sub": employee_user.username})
 
 

@@ -51,11 +51,70 @@ def setup_approval_data(db: Session):
         AssessmentRecord.status == "pending_approval"
     ).delete(synchronize_session=False)
     db.query(PeerReviewTask).filter(PeerReviewTask.status == "completed").delete(synchronize_session=False)
-    db.query(User).filter(User.username.in_(["testmgr", "testhr", "testemp1", "testemp2", "testdepthead"])).delete(synchronize_session=False)
-    db.query(Employee).filter(Employee.employee_no.in_(["TSTMGR", "TSTHR", "TSTEMP1", "TSTEMP2", "TSTDH"])).delete(synchronize_session=False)
+    # 清理孤儿记录：历史残留记录会因主键复用挂到新周期/新员工上，污染历史断言
+    orphan_record_ids = [
+        rid for (rid,) in db.query(AssessmentRecord.id).filter(
+            ~AssessmentRecord.cycle_id.in_(db.query(AssessmentCycle.id))
+        ).all()
+    ] + [
+        rid for (rid,) in db.query(AssessmentRecord.id).filter(
+            ~AssessmentRecord.employee_id.in_(db.query(Employee.id))
+        ).all()
+    ]
+    if orphan_record_ids:
+        db.query(ApprovalRecord).filter(
+            ApprovalRecord.record_id.in_(orphan_record_ids)
+        ).delete(synchronize_session=False)
+        db.query(PeerReviewTask).filter(
+            PeerReviewTask.record_id.in_(orphan_record_ids)
+        ).delete(synchronize_session=False)
+        db.query(AssessmentRecord).filter(
+            AssessmentRecord.id.in_(orphan_record_ids)
+        ).delete(synchronize_session=False)
+    # 清理历史遗留数据：测试周期下的所有记录（主键复用会让残留记录挂到新员工身上）
+    leftover_cycle_ids = [
+        cid for (cid,) in db.query(AssessmentCycle.id).filter(
+            AssessmentCycle.name.like("Test Cycle%")
+        ).all()
+    ]
+    if leftover_cycle_ids:
+        leftover_record_ids = [
+            rid for (rid,) in db.query(AssessmentRecord.id).filter(
+                AssessmentRecord.cycle_id.in_(leftover_cycle_ids)
+            ).all()
+        ]
+        if leftover_record_ids:
+            db.query(PeerReviewTask).filter(
+                PeerReviewTask.record_id.in_(leftover_record_ids)
+            ).delete(synchronize_session=False)
+            db.query(ApprovalRecord).filter(
+                ApprovalRecord.record_id.in_(leftover_record_ids)
+            ).delete(synchronize_session=False)
+            db.query(AssessmentRecord).filter(
+                AssessmentRecord.id.in_(leftover_record_ids)
+            ).delete(synchronize_session=False)
+    # 清理历史遗留数据：测试员工的历史记录会影响“最近 3 个周期”断言
+    test_employee_ids = [
+        eid for (eid,) in db.query(Employee.id).filter(
+            Employee.employee_no.in_(["TSTMGR", "TSTHR", "TSTEMP1", "TSTEMP2", "TSTDH", "UNRELATED"])
+        ).all()
+    ]
+    if test_employee_ids:
+        db.query(ApprovalRecord).filter(
+            ApprovalRecord.record_id.in_(
+                db.query(AssessmentRecord.id).filter(
+                    AssessmentRecord.employee_id.in_(test_employee_ids)
+                )
+            )
+        ).delete(synchronize_session=False)
+        db.query(AssessmentRecord).filter(
+            AssessmentRecord.employee_id.in_(test_employee_ids)
+        ).delete(synchronize_session=False)
+    db.query(User).filter(User.username.in_(["testmgr", "testhr", "testemp1", "testemp2", "testdepthead", "testdepthead2", "unrelatedmgr"])).delete(synchronize_session=False)
+    db.query(Employee).filter(Employee.employee_no.in_(["TSTMGR", "TSTHR", "TSTEMP1", "TSTEMP2", "TSTDH", "UNRELATED"])).delete(synchronize_session=False)
     db.query(AssessmentCycle).filter(AssessmentCycle.name.like("Test Cycle%")).delete(synchronize_session=False)
-    db.query(Department).filter(Department.code.in_(["TESTDEPT1", "TESTDEPT2"])).delete(synchronize_session=False)
-    db.query(Position).filter(Position.name.like("Test Position%")).delete(synchronize_session=False)
+    db.query(Department).filter(Department.code.in_(["TESTDEPT1", "TESTDEPT2", "UNRELATED"])).delete(synchronize_session=False)
+    db.query(Position).filter((Position.name.like("Test Position%")) | (Position.name == "无关岗位")).delete(synchronize_session=False)
     db.query(SystemConfig).filter(SystemConfig.key == "approval_chain").delete(synchronize_session=False)
     db.commit()
 
@@ -101,18 +160,21 @@ def setup_approval_data(db: Session):
         password_hash=get_password_hash("Test123!"),
         role="manager",
         employee_id=mgr_emp.id,
+        is_first_login=False,
     )
     hr_user = User(
         username="testhr",
         password_hash=get_password_hash("Test123!"),
         role="hr",
         employee_id=hr_emp.id,
+        is_first_login=False,
     )
     emp1_user = User(
         username="testemp1",
         password_hash=get_password_hash("Test123!"),
         role="employee",
         employee_id=emp1.id,
+        is_first_login=False,
     )
     db.add(mgr_user)
     db.add(hr_user)
@@ -307,10 +369,16 @@ def setup_approval_data(db: Session):
         "cycle3": cycle3,
     }
 
-    # Cleanup
-    db.query(ApprovalRecord).filter(ApprovalRecord.record_id.in_([record1.id, record2.id, record3.id, past_record1.id, past_record2.id])).delete(synchronize_session=False)
-    db.query(PeerReviewTask).filter(PeerReviewTask.record_id == record1.id).delete(synchronize_session=False)
-    db.query(AssessmentRecord).filter(AssessmentRecord.id.in_([record1.id, record2.id, record3.id, past_record1.id, past_record2.id])).delete(synchronize_session=False)
+    # Cleanup（按周期清理，避免主键复用后残留记录）
+    cycle_record_ids = [
+        rid for (rid,) in db.query(AssessmentRecord.id).filter(
+            AssessmentRecord.cycle_id.in_([cycle1.id, cycle2.id, cycle3.id])
+        ).all()
+    ]
+    if cycle_record_ids:
+        db.query(ApprovalRecord).filter(ApprovalRecord.record_id.in_(cycle_record_ids)).delete(synchronize_session=False)
+        db.query(PeerReviewTask).filter(PeerReviewTask.record_id.in_(cycle_record_ids)).delete(synchronize_session=False)
+        db.query(AssessmentRecord).filter(AssessmentRecord.id.in_(cycle_record_ids)).delete(synchronize_session=False)
     db.query(User).filter(User.username.in_(["testmgr", "testhr", "testemp1"])).delete(synchronize_session=False)
     db.query(Employee).filter(Employee.employee_no.in_(["TSTMGR", "TSTHR", "TSTEMP1", "TSTEMP2", "TSTDH"])).delete(synchronize_session=False)
     db.query(AssessmentCycle).filter(AssessmentCycle.name.like("Test Cycle%")).delete(synchronize_session=False)
@@ -349,6 +417,7 @@ class TestP5_06_ApprovalsList:
             password_hash=get_password_hash("Test123!"),
             role="manager",
             employee_id=dept_head_emp,
+            is_first_login=False,
         )
         db.add(dept_head_user)
         db.commit()
@@ -403,6 +472,7 @@ class TestP5_06_ApprovalsList:
             password_hash=get_password_hash("Test123!"),
             role="manager",
             employee_id=dept_head_emp,
+            is_first_login=False,
         )
         db.add(dept_head_user)
         db.commit()
@@ -489,6 +559,7 @@ class TestP5_07_ApprovalsDetail:
             password_hash=get_password_hash("Test123!"),
             role="manager",
             employee_id=unrelated_mgr_emp.id,
+            is_first_login=False,
         )
         db.add(unrelated_mgr_user)
         db.commit()

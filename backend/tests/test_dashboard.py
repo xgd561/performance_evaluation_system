@@ -32,9 +32,9 @@ class TestDashboardMain:
             assert "status" in data["recent_cycles"][0]
         assert isinstance(data["pending_tasks"], list)
 
-    def test_dashboard_first_login_redirect(self, client: TestClient, employee_token, db_session):
-        # The employee_token fixture creates a user with is_first_login=True
-        resp = client.get("/dashboard", headers={"Authorization": f"Bearer {employee_token}"})
+    def test_dashboard_first_login_redirect(self, client: TestClient, first_login_token, db_session):
+        # 首登未改密的账号被全局拦截，任何受保护接口都返回 403
+        resp = client.get("/dashboard", headers={"Authorization": f"Bearer {first_login_token}"})
         assert resp.status_code == 403
         assert "请先修改初始密码" in resp.json()["message"]
 
