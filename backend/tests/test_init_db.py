@@ -14,7 +14,7 @@ client = TestClient(app)
 
 
 @pytest.fixture(scope="module")
-def init_db_fixture():
+def init_db_fixture(test_db_info):
     """
     运行 init_db.py 初始化演示数据，并在测试结束后恢复。
     由于 init_db.py 会操作真实数据库，此 fixture 在模块级别执行一次。
@@ -29,6 +29,10 @@ def init_db_fixture():
     init_db_module = importlib.util.module_from_spec(spec)
     sys.modules["init_db"] = init_db_module
     spec.loader.exec_module(init_db_module)
+    # conftest 已把应用指向临时测试库；让脚本也写同一个库，
+    # 否则它会重建 data/db 下的真实库，而 HTTP 请求读的是测试库。
+    init_db_module.SQLALCHEMY_DATABASE_URL = test_db_info["url"]
+    init_db_module.DB_PATH = test_db_info["path"]
     init_db_module.init_database()
 
     yield

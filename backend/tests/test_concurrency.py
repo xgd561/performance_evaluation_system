@@ -9,7 +9,7 @@ client = TestClient(app)
 
 
 def _login_and_get_token(username, password):
-    res = client.post("/api/auth/login", json={"username": username, "password": password})
+    res = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     return res.json().get("access_token")
 
 
@@ -36,7 +36,7 @@ def test_concurrent_employee_list():
     headers = {"Authorization": f"Bearer {token}"}
 
     def fetch():
-        return client.get("/api/employees?page=1&size=20", headers=headers)
+        return client.get("/api/v1/employees?page=1&size=20", headers=headers)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(fetch) for _ in range(5)]
@@ -54,17 +54,17 @@ def test_concurrent_self_score_submit():
     headers = {"Authorization": f"Bearer {token}"}
 
     # 先获取一个 record_id
-    cycles = client.get("/api/assessment-cycles", headers=headers).json()
+    cycles = client.get("/api/v1/assessment-cycles", headers=headers).json()
     if not cycles or not isinstance(cycles, list) or len(cycles) == 0:
         pytest.skip("No cycles available for concurrency test")
     cycle_id = cycles[0]["id"]
-    summary = client.get(f"/api/scores/summary/{cycle_id}", headers=headers).json()
+    summary = client.get(f"/api/v1/scores/summary/{cycle_id}", headers=headers).json()
     if not summary or not isinstance(summary, list) or len(summary) == 0:
         pytest.skip("No records for concurrency test")
     record_id = summary[0]["record_id"]
 
     def submit():
-        return client.post(f"/api/scores/self/{record_id}", headers=headers, json={
+        return client.post(f"/api/v1/scores/self/{record_id}", headers=headers, json={
             "performance": 85, "ability": 80, "attitude": 90
         })
 

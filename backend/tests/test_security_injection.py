@@ -1,12 +1,17 @@
 import pytest
+from datetime import date, timedelta
 from fastapi.testclient import TestClient
 from app.main import app
 
 client = TestClient(app)
 
+# 后端禁止创建开始日期早于今天的周期，这里用相对今天推算的日期
+_CYCLE_START = (date.today() + timedelta(days=30)).isoformat()
+_CYCLE_END = (date.today() + timedelta(days=60)).isoformat()
+
 
 def _login():
-    res = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+    res = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
     return res.json().get("access_token")
 
 
@@ -18,7 +23,7 @@ def test_sql_injection_in_login():
         {"username": "admin' UNION SELECT * FROM employees --", "password": "test"},
     ]
     for payload in malicious_payloads:
-        res = client.post("/api/auth/login", json=payload)
+        res = client.post("/api/v1/auth/login", json=payload)
         # 不应 500，也不应返回异常结构；理想是 401/400
         assert res.status_code in (200, 401, 400, 422)
         if res.status_code == 200:
@@ -31,7 +36,7 @@ def test_sql_injection_in_employee_search():
     token = _login()
     headers = {"Authorization": f"Bearer {token}"}
     malicious = "' OR '1'='1'; DROP TABLE employees; --"
-    res = client.get(f"/api/employees?keyword={malicious}&page=1&size=20", headers=headers)
+    res = client.get(f"/api/v1/employees?keyword={malicious}&page=1&size=20", headers=headers)
     assert res.status_code == 200
     body = res.json()
     assert isinstance(body, dict)
@@ -43,7 +48,7 @@ def test_xss_in_employee_create():
     token = _login()
     headers = {"Authorization": f"Bearer {token}"}
     xss_name = "<script>alert('xss')</script>"
-    res = client.post("/api/employees", headers=headers, json={
+    res = client.post("/api/v1/employees", headers=headers, json={
         "employee_no": f"XSS-{hash(xss_name) % 100000}",
         "name": xss_name,
         "email": "xss@example.com",
@@ -60,11 +65,11 @@ def test_sql_injection_in_cycle_name():
     token = _login()
     headers = {"Authorization": f"Bearer {token}"}
     malicious_name = "周期'; DROP TABLE assessment_cycles; --"
-    res = client.post("/api/assessment-cycles", headers=headers, json={
+    res = client.post("/api/v1/assessment-cycles", headers=headers, json={
         "name": malicious_name,
         "type": "monthly",
-        "start_date": "2025-01-01",
-        "end_date": "2025-01-31",
+        "start_date": _CYCLE_START,
+        "end_date": _CYCLE_END,
         "weights": {"self": 30, "manager": 50, "peer": 20},
         "grade_rules": {"A": 90, "B": 80, "C": 60, "D": 0}
     })
@@ -79,6 +84,6 @@ def test_path_traversal_in_export():
     """报表导出路径遍历防护"""
     token = _login()
     headers = {"Authorization": f"Bearer {token}"}
-    res = client.get("/api/reports/cycle/1/export?filename=../../etc/passwd", headers=headers)
+    res = client.get("/api/v1/reports/cycle/1/export?filename=../../etc/passwd", headers=headers)
     # 不应 500，不应返回系统文件内容
     assert res.status_code in (200, 400, 403, 404)

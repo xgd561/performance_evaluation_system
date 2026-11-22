@@ -387,6 +387,8 @@ def launch_cycle(
         old_value={"status": "not_started"},
         new_value={"status": "pending_self", "created_records": created, "employee_ids": req.employee_ids},
     )
+    # log_operation/create_notification 只 flush 不 commit，需由调用方提交，否则通知与日志随会话关闭丢失
+    db.commit()
 
     return {"created_records": created, "status": "进行中（自评）"}
 

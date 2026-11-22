@@ -212,9 +212,41 @@ cd frontend && npm run dev
 ### 强制分布降级算法（`services/distribution_enforcer.py`）
 
 - 按部门统计各等级（A/B/C/D）人数，检查是否超出比例上限
+- 比例上限缺省归一化为 **A 20% / B 70% / C 10%**（D 不设上限，避免因 0 配额导致无效迭代）
+- `grade_rules` 支持两种写法：`{"A": 90, "B": 80}` 的数值简写（按阈值降序推导区间），以及 `{"A": {"min": 90, "max": 100}}` 的完整区间写法
 - 小部门豁免（≤5 人时放宽限制）
 - 超标时从低到高排序，依次降级（A→B→C→D），最多迭代 10 次
 - 返回调整后记录、调整日志、特批候选人名单
+- 是否执行强制分布由周期开关 `is_distribution_enabled` 控制；关闭时只算分不分级，不产生降级与特批标记
+
+### 统一响应与错误处理
+
+- 成功响应由 `app/core/response.py` 的 `UnifiedResponseMiddleware` 统一包装为 `{"code": 0, "message": "success", "data": <业务数据>}`，分页与裸数组同样包进 `data`
+- 中间件只处理 `2xx` + `application/json` 响应，且对已是信封结构的响应幂等跳过；`/health`、`/api/v1/health`、`/docs`、`/openapi.json` 等运维与文档路径不包装
+- 错误响应保留真实 HTTP 状态码（400/403/404/422/500），body 为 `{code, message, data: null}`；前端 `request.js` 兼容 `message` 与 `detail` 两种字段
+- 前端 `request.js` 识别到信封后直接返回 `data.data`，因此各业务视图无需改动
+
+### 部门等级分布接口
+
+- `GET /approvals/department-distribution?department_id=&cycle_id=`：返回指定部门在当前（或指定）周期内的等级分布 `{grades: [{grade, count, ratio, is_over_limit}], total, cycle_id, cycle_name, is_distribution_enabled}`
+- 审批详情页 `ApprovalDetail.vue` 用它渲染部门分布；接口不可用时前端降级为空数据并输出告警，不阻断主流程
+
+### 考核档案 PDF 归档
+
+- `services/pdf_archive_generator.py` 的默认归档目录固定为 `backend/uploads/archives/<cycle_id>/`，不随进程 CWD 变化
+
+### 职级字段（`level`）
+
+- `Employee.level` 与 `Position.level` 为可选职级，取值需匹配 `^[PM][1-9]\d?$`（如 P1–P9、M1–M9），空串归一为 `None`
+- 新增列由启动时的模型驱动迁移 `_migrate_db()` 自动补齐，无需手写 ALTER TABLE
+
+### 测试数据库隔离
+
+- `backend/tests/conftest.py` 在会话开始前把 `app.database.engine` 与 `app.database.SessionLocal` 指向临时 SQLite 文件，历史用例中的模块级 `SessionLocal()` 与 HTTP 请求都落到测试库，不会写入 `data/db/performance_evaluation.db`
+- 每个模块首次测试前会重建测试库并播种基础部门/岗位/账号（admin / hr001 / mgr001 / peer001 / emp001 / exec001），密码采用与用例一致的约定值（如 `Mgr001@123`），密码哈希在进程内缓存以降低 bcrypt 开销；按模块重建等价于每个模块独立数据库，避免上一个模块遗留的已归档周期等数据污染后续用例
+- `test_init_db.py` 例外：它通过 `scripts/init_db.py` 自行播种演示数据，`init_db_fixture` 会把脚本的 `SQLALCHEMY_DATABASE_URL`/`DB_PATH` 改写到测试库，否则脚本会重建真实库而 HTTP 请求仍在读测试库
+- 登录失败计数 `app.routers.auth._failed_attempts` 是进程内全局状态，conftest 在每个用例前后清空，避免跨用例累积误触 429 锁定
+- `db_session` fixture 仍按函数重建表结构，需要基础账号的模块级用例请依赖模块级自动播种而不是该 fixture
 
 ### 操作日志（`services/operation_logger.py`）
 

@@ -762,8 +762,8 @@ def submit_self_score(
     if record.employee_id != user.employee_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作此考核记录")
 
-    # 状态校验：待自评可直接提交；周期尚未启动（not_started）时允许首次自评，提交前自动启动周期
-    if record.status not in ("pending_self", "not_started"):
+    # 状态校验：仅待自评状态可提交；周期未启动时应由 HR 先启动周期
+    if record.status != "pending_self":
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="当前状态不允许提交自评")
 
     # 分数校验
@@ -783,20 +783,9 @@ def submit_self_score(
 
     old_status = record.status
     record.self_scores = self_scores
-    # not_started 状态下状态机只允许 start_cycle，先自动启动周期完成 not_started -> pending_self
-    current_state = old_status
-    if current_state == "not_started":
-        current_state = WorkflowStateMachine.transition(
-            current_state=current_state,
-            action="start_cycle",
-            db=db,
-            user_id=user.id,
-            target_id=record_id,
-            target_type="assessment_record",
-        )
     # 使用状态机执行转换: pending_self -> submit_self -> pending_manager
     record.status = WorkflowStateMachine.transition(
-        current_state=current_state,
+        current_state=old_status,
         action="submit_self",
         db=db,
         user_id=user.id,

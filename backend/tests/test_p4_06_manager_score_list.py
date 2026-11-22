@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -58,8 +60,8 @@ def manager_subordinate_setup(db: Session):
         cycle = AssessmentCycle(
             name="test-cycle",
             type="annual",
-            start_date="2026-07-01",
-            end_date="2026-07-31",
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 31),
             peer_review_enabled=True,
         )
         db.add(cycle)

@@ -644,13 +644,13 @@ class TestEdgeCases:
         assert resp.status_code == 401
 
     def test_self_score_not_started_status(self, client: TestClient, employee_token, employee_user, db_session: Session):
+        """未启动周期（not_started）不允许提交自评，直接返回 422"""
         cycle = _create_cycle(db_session)
         record = _create_record(db_session, cycle.id, employee_user.employee_id, status="not_started")
         payload = {"performance": 85, "ability": 90, "attitude": 88}
         resp = client.post(f"/scores/self/{record.id}", json=payload, headers={"Authorization": f"Bearer {employee_token}"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "pending_manager"
+        assert resp.status_code == 422
+        assert "当前状态不允许提交自评" in resp.json()["message"]
 
     def test_peer_score_updates_existing_peer_scores(self, client: TestClient, peer_token, peer_user, employee_user, db_session: Session):
         cycle = _create_cycle(db_session)

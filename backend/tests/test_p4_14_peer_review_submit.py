@@ -2,7 +2,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import date, datetime
 
 from app.main import app
 from app.models import (
@@ -58,8 +58,8 @@ def peer_review_task(db: Session):
         cycle = AssessmentCycle(
             name="test-cycle",
             type="annual",
-            start_date="2026-07-01",
-            end_date="2026-07-31",
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 31),
             peer_review_enabled=True,
         )
         db.add(cycle)
@@ -485,7 +485,7 @@ def test_submit_peer_review_record_peer_scores_updated(peer_token, peer_review_t
     assert resp.status_code == 200
 
     db.refresh(rec)
-    peer_scores = json.loads(rec.peer_scores) if rec.peer_scores else {}
+    peer_scores = load_json(rec.peer_scores, {})
     assert peer_scores.get("ability") == 77
 
     # 恢复
@@ -618,7 +618,7 @@ def test_submit_peer_review_record_peer_scores_updated(peer_token, peer_review_t
     assert resp.status_code == 200
 
     db.refresh(rec)
-    peer_scores = json.loads(rec.peer_scores) if rec.peer_scores else {}
+    peer_scores = load_json(rec.peer_scores, {})
     assert peer_scores.get("ability") == 77
 
     # 恢复

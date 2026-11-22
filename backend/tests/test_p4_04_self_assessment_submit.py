@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -5,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.main import app
 from app.models import AssessmentRecord, ScoreDetail, User, Employee
 from app.database import SessionLocal
+from app.utils.json_columns import load_json
 
 client = TestClient(app)
 
@@ -49,7 +52,7 @@ def sample_record(db: Session):
         from app.models import AssessmentCycle
         cycle = db.query(AssessmentCycle).first()
         if not cycle:
-            cycle = AssessmentCycle(name="test-cycle", type="annual", start_date="2026-07-01", end_date="2026-07-31")
+            cycle = AssessmentCycle(name="test-cycle", type="annual", start_date=date(2026, 7, 1), end_date=date(2026, 7, 31))
             db.add(cycle)
             db.flush()
         rec = AssessmentRecord(cycle_id=cycle.id, employee_id=emp_user.employee_id, status="pending_self")
@@ -85,8 +88,7 @@ def test_submit_self_score_success(employee_token, sample_record, db: Session):
     # 验证数据库状态
     db.refresh(sample_record)
     assert sample_record.status == "pending_manager"
-    import json
-    self_scores = json.loads(sample_record.self_scores)
+    self_scores = load_json(sample_record.self_scores, {})
     assert self_scores["performance"] == 85
     assert self_scores["ability"] == 90
     assert self_scores["attitude"] == 88
@@ -229,8 +231,8 @@ def test_submit_self_score_from_not_started(employee_token, sample_record, db: S
         json=payload,
         headers={"Authorization": f"Bearer {employee_token}"},
     )
-    # 状态机不允许 not_started -> submit_self，返回 400
-    assert resp.status_code == 400
+    # 状态机不允许 not_started -> submit_self，状态校验直接返回 422
+    assert resp.status_code == 422
 
     # restore
     sample_record.status = "pending_self"

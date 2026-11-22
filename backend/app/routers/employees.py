@@ -4,6 +4,7 @@ from sqlalchemy import or_
 from typing import List, Optional, Dict, Any
 import io
 import json
+import re
 
 try:
     import openpyxl
@@ -23,13 +24,18 @@ from app.schemas import (
     StandardResponse,
 )
 
-from app.services.operation_logger import log_operation
-
-from app.services.operation_logger import log_operation
-
-from app.services.operation_logger import log_operation
-
 router = APIRouter()
+
+_HTML_TAG_PATTERN = re.compile(r"<[^>]*>")
+
+
+def _ensure_name_without_html(name: Optional[str]) -> None:
+    """员工姓名不接受尖括号标签，避免脚本片段落库后回显。"""
+    if name and _HTML_TAG_PATTERN.search(name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="员工姓名不能包含 HTML 标签",
+        )
 
 
 @router.get("/template")
@@ -487,6 +493,7 @@ def create_employee(
     db: Session = Depends(get_db),
     user: User = Depends(require_role("admin", "hr")),
 ):
+    _ensure_name_without_html(req.name)
     # Check duplicate employee_no
     existing = db.query(Employee).filter(Employee.employee_no == req.employee_no).first()
     if existing:
@@ -567,6 +574,8 @@ def update_employee(
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工不存在")
+
+    _ensure_name_without_html(req.name)
 
     # Check duplicate employee_no
     if req.employee_no:
