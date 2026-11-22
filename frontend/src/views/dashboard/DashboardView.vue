@@ -65,13 +65,13 @@
             ></div>
           </div>
         </div>
-        <!-- 图例 -->
-        <div class="flow-legend">
-          <div class="legend-item"><span class="legend-dot completed"></span>已完成</div>
-          <div class="legend-item"><span class="legend-dot current"></span>进行中</div>
-          <div class="legend-item"><span class="legend-dot pending"></span>未开始</div>
-          <div class="legend-item"><span class="legend-dot role"></span>我的职责</div>
-        </div>
+      </div>
+      <!-- 图例放在横向滚动容器之外，避免拖动流程时图例跟着移出视野 -->
+      <div class="flow-legend">
+        <div class="legend-item"><span class="legend-dot completed"></span>已完成</div>
+        <div class="legend-item"><span class="legend-dot current"></span>进行中</div>
+        <div class="legend-item"><span class="legend-dot pending"></span>未开始</div>
+        <div class="legend-item"><span class="legend-dot role"></span>我的职责</div>
       </div>
 
       <!-- 当前任务提示卡片 -->
@@ -314,10 +314,10 @@ function isCurrent(key) {
   return statusMap[key]?.includes(activeCycle.value.status) || false
 }
 
-// 连接线是否激活
+// 连接线是否处于「流程前沿」：只有最后一条已点亮的线段需要渐变动画，
+// 其余已完成段保持纯色；全部完成后没有前沿，避免整条流程一直在流动
 function isLineActive(n) {
-  const completedCount = stages.filter((s, i) => i < n && isCompleted(s.key)).length
-  return completedCount >= n
+  return isLineCompleted(n) && !isLineCompleted(n + 1)
 }
 
 // 获取徽章数字
@@ -625,54 +625,103 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: flex-start;
   position: relative;
-  min-width: 900px;
+  /* gap 保证相邻节点之间始终留有可见的连线区间；
+     6 × 146 + 5 × 28 + 左右 padding = 1048，故最小宽度取 1050 */
+  gap: 28px;
+  min-width: 1050px;
   padding: 28px 16px 12px;
 }
 
-/* 连接线：贯穿节点中心 */
+/* 连接线：只画在相邻卡片的缝隙里，
+   水平方向用 73px padding 让出卡片半宽，避免透过半透明卡片背景 */
 .flow-lines {
   position: absolute;
-  top: 62px;
-  left: 110px;
-  right: 110px;
+  /* 28(容器 padding-top) + 2(卡片 border) + 28(卡片 padding-top) + 24(icon 半径) - 2(线高的一半) */
+  top: 80px;
+  /* 16(容器 padding) + 73(卡片宽的一半) */
+  left: 89px;
+  right: 89px;
   display: flex;
-  justify-content: space-between;
+  gap: 0;
   z-index: 0;
   pointer-events: none;
-  gap: 8px;
 }
 
 .flow-line {
+  position: relative;
   flex: 1;
   height: 4px;
-  background: #e2e8f0;
+  /* 两端各让出半个卡片宽，背景（虚线）落在 content box，即只覆盖卡片间隙 */
+  padding: 0 73px;
+  background-clip: content-box;
   border-radius: 2px;
-  transition: all 0.4s ease;
-  position: relative;
-  overflow: hidden;
+  /* 未开始：短划线，避免实线抢走已完成段的视觉重量 */
+  background-image: repeating-linear-gradient(90deg, #cbd5e1 0 5px, transparent 5px 10px);
+  color: #cbd5e1;
+  transition: color 0.4s ease;
 }
 
+/* 箭头：贴在下一张卡片左边缘，指明流程前进方向，颜色跟随线段状态 */
+.flow-line::before {
+  content: '';
+  position: absolute;
+  right: 73px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border: 5px solid transparent;
+  border-left: 6px solid currentColor;
+  transform: translateY(-50%);
+  z-index: 1;
+}
+
+/* 已完成进度：从卡片右边缘展开到下一张卡片左边缘 */
 .flow-line::after {
   content: '';
   position: absolute;
   top: 0;
-  left: 0;
-  right: 0;
+  right: 73px;
   bottom: 0;
-  background: linear-gradient(90deg, #10b981 0%, #10b981 100%);
+  left: 73px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
   transform: scaleX(0);
-  transform-origin: left;
+  transform-origin: left center;
   transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-  border-radius: 2px;
 }
 
-.flow-line.active::after,
+.flow-line.completed {
+  color: #10b981;
+}
+
 .flow-line.completed::after {
   transform: scaleX(1);
 }
 
-.flow-line.active:not(.completed)::after {
-  background: linear-gradient(90deg, #10b981 0%, #6366f1 100%);
+/* 流程前沿（指向当前阶段的那一段）：绿→靛蓝渐变并让光带流动，
+   与「进行中」阶段呼应 */
+.flow-line.active {
+  color: #6366f1;
+}
+
+.flow-line.active::after {
+  transform: scaleX(1);
+  background: linear-gradient(90deg, #10b981 0%, #4f46e5 55%, #818cf8 100%);
+  background-size: 200% 100%;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.35);
+  animation: flow-sweep 2.6s linear infinite;
+}
+
+@keyframes flow-sweep {
+  from { background-position: 0% 50%; }
+  to { background-position: 200% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-line.active::after {
+    animation: none;
+  }
 }
 
 /* Stage Node */
@@ -682,8 +731,11 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   align-items: center;
+  flex: 0 0 146px;
   width: 146px;
-  padding: 16px 12px;
+  /* 统一顶部留白：带职责角标的节点也有 22px 角标，
+     所有节点取同一 padding-top 后 6 个 icon 圆心才能落在同一条水平线上 */
+  padding: 28px 12px 16px;
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition: all var(--transition-base);
