@@ -158,155 +158,78 @@ def _migrate_db():
         print("[migrate] schema up to date")
 
 
-@app.on_event("startup")
-async def startup_event():
-    init_db()
-    _migrate_db()
-    # Seed default admin user if not exists
-    from sqlalchemy.orm import Session
+# 演示账号口径与 backend/tests/conftest.py 的 TEST_USERS 保持一致。
+# 历史版本把除 testuser 以外的账号密码都写成了 admin123，导致按文档用
+# Hr001@123 等密码登录时报 401，而前端 401 拦截器又会提示「登录已过期」，
+# 很容易被误判成账号过期。
+DEFAULT_ACCOUNTS = [
+    # username, password, role, employee_no, name, position, is_first_login
+    ("admin", "admin123", "admin", "ADMIN001", "系统管理员", "系统管理员", False),
+    ("hr001", "Hr001@123", "hr", "HR001", "张HR", "HR专员", False),
+    ("mgr001", "Mgr001@123", "manager", "MGR001", "李经理", "技术经理", False),
+    ("emp001", "Emp001@123", "employee", "EMP001", "王员工", "Java工程师", True),
+    ("peer001", "Peer001@123", "peer", "PEER001", "协作员工", "协作人", False),
+    ("exec001", "Exec001@123", "executive", "EXEC001", "赵高管", "高管", False),
+    ("testuser", "Correct123", "employee", "TEST001", "测试用户", "系统管理员", False),
+]
+
+# 旧种子统一使用的密码，仅用于识别「从未改过密码」的账号
+_LEGACY_SEED_PASSWORD = "admin123"
+
+
+def _seed_user_accounts():
+    """幂等创建演示账号，并纠正旧种子遗留的错误密码。"""
     from app.database import SessionLocal
-    from app.auth import get_password_hash
+    from app.auth import get_password_hash, verify_password
     from app.models import User, Employee, Department, Position
 
     db = SessionLocal()
     try:
-        # Ensure default department and position exist (used by all seeded users)
         dept = db.query(Department).filter(Department.code == "ADMIN").first()
         if not dept:
             dept = Department(name="管理部", code="ADMIN")
             db.add(dept)
             db.flush()
-        pos = db.query(Position).filter(Position.name == "系统管理员").first()
-        if not pos:
-            pos = Position(name="系统管理员", department_id=dept.id)
-            db.add(pos)
-            db.flush()
 
-        # Check if admin user exists
-        admin = db.query(User).filter(User.username == "admin").first()
-        if not admin:
-            # Create admin employee
-            emp = Employee(
-                employee_no="ADMIN001",
-                name="系统管理员",
-                department_id=dept.id,
-                position_id=pos.id,
-            )
-            db.add(emp)
-            db.flush()
-            admin = User(
-                username="admin",
-                password_hash=get_password_hash("admin123"),
-                role="admin",
-                employee_id=emp.id,
-                is_first_login=False,
-            )
-            db.add(admin)
-            db.commit()
+        for username, password, role, employee_no, name, position_name, first_login in DEFAULT_ACCOUNTS:
+            position = db.query(Position).filter(Position.name == position_name).first()
+            if not position:
+                position = Position(name=position_name, department_id=dept.id)
+                db.add(position)
+                db.flush()
 
-        # Seed HR user (must match TEST_USERS in conftest.py)
-        hr = db.query(User).filter(User.username == "hr001").first()
-        if not hr:
-            hr_emp = Employee(
-                employee_no="HR001",
-                name="张HR",
-                department_id=dept.id,
-                position_id=pos.id,
-            )
-            db.add(hr_emp)
-            db.flush()
-            hr = User(
-                username="hr001",
-                password_hash=get_password_hash("admin123"),
-                role="hr",
-                employee_id=hr_emp.id,
-                is_first_login=False,
-            )
-            db.add(hr)
-            db.commit()
+            employee = db.query(Employee).filter(Employee.employee_no == employee_no).first()
+            if not employee:
+                employee = Employee(
+                    employee_no=employee_no,
+                    name=name,
+                    department_id=dept.id,
+                    position_id=position.id,
+                )
+                db.add(employee)
+                db.flush()
 
-        # Seed manager user
-        mgr = db.query(User).filter(User.username == "mgr001").first()
-        if not mgr:
-            mgr_emp = Employee(
-                employee_no="MGR001",
-                name="李经理",
-                department_id=dept.id,
-                position_id=pos.id,
-            )
-            db.add(mgr_emp)
-            db.flush()
-            mgr = User(
-                username="mgr001",
-                password_hash=get_password_hash("admin123"),
-                role="manager",
-                employee_id=mgr_emp.id,
-                is_first_login=False,
-            )
-            db.add(mgr)
-            db.commit()
-
-        # Seed employee user
-        emp_user = db.query(User).filter(User.username == "emp001").first()
-        if not emp_user:
-            emp_emp = Employee(
-                employee_no="WANG001",
-                name="王员工",
-                department_id=dept.id,
-                position_id=pos.id,
-            )
-            db.add(emp_emp)
-            db.flush()
-            emp_user = User(
-                username="emp001",
-                password_hash=get_password_hash("admin123"),
-                role="employee",
-                employee_id=emp_emp.id,
-                is_first_login=True,
-            )
-            db.add(emp_user)
-            db.commit()
-
-        # Seed peer user
-        peer = db.query(User).filter(User.username == "peer001").first()
-        if not peer:
-            peer_emp = Employee(
-                employee_no="PEER001",
-                name="赵协作",
-                department_id=dept.id,
-                position_id=pos.id,
-            )
-            db.add(peer_emp)
-            db.flush()
-            peer = User(
-                username="peer001",
-                password_hash=get_password_hash("admin123"),
-                role="peer",
-                employee_id=peer_emp.id,
-                is_first_login=False,
-            )
-            db.add(peer)
-            db.commit()
-
-        # Seed testuser for rate limiting test
-        test_user = db.query(User).filter(User.username == "testuser").first()
-        if not test_user:
-            test_emp = Employee(
-                employee_no="TEST001",
-                name="测试用户",
-                department_id=dept.id,
-                position_id=pos.id,
-            )
-            db.add(test_emp)
-            db.flush()
-            test_user = User(
-                username="testuser",
-                password_hash=get_password_hash("Correct123"),
-                role="employee",
-                employee_id=test_emp.id,
-                is_first_login=False,
-            )
-            db.add(test_user)
+            user = db.query(User).filter(User.username == username).first()
+            if not user:
+                db.add(User(
+                    username=username,
+                    password_hash=get_password_hash(password),
+                    role=role,
+                    employee_id=employee.id,
+                    is_first_login=first_login,
+                ))
+            elif password != _LEGACY_SEED_PASSWORD and verify_password(
+                _LEGACY_SEED_PASSWORD, user.password_hash
+            ):
+                # 密码仍是旧种子值说明用户没改过，按目标密码纠正；改过则不动
+                user.password_hash = get_password_hash(password)
             db.commit()
     finally:
         db.close()
+
+
+@app.on_event("startup")
+async def startup_event():
+    init_db()
+    _migrate_db()
+    _seed_user_accounts()

@@ -92,12 +92,17 @@ request.interceptors.response.use(
       msg = response.data?.message || response.data?.detail || error.message || `HTTP ${status}`
 
       if (status === 401) {
-        localStorage.removeItem('pes_access_token')
-        ElMessage.warning('登录已过期，请重新登录')
-        setTimeout(() => {
-          window.location.href = '/login'
-        }, 1000)
-        return Promise.reject(new Error('登录已过期'))
+        // 登录接口的 401 是「用户名或密码错误」，不能被当成登录态失效，
+        // 否则会把登录失败误报成「登录已过期」并跳回登录页
+        const isLoginRequest = String(error.config?.url || '').includes('/auth/login')
+        if (!isLoginRequest) {
+          localStorage.removeItem('pes_access_token')
+          ElMessage.warning('登录已过期，请重新登录')
+          setTimeout(() => {
+            window.location.href = '/login'
+          }, 1000)
+          return Promise.reject(new Error('登录已过期'))
+        }
       }
     } else {
       msg = error.message || '网络错误'

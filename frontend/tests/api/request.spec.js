@@ -54,7 +54,8 @@ describe('P0-15 request.js — 前端 API 请求封装', () => {
     vi.clearAllMocks()
     localStorage.clear()
     delete window.location
-    window.location = { href: '' }
+    // 请求拦截器会用 window.location.origin 构造 URL 打日志，测试环境需补齐 origin
+    window.location = { href: '', origin: 'http://localhost:3000' }
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
@@ -95,13 +96,13 @@ describe('P0-15 request.js — 前端 API 请求封装', () => {
   })
 
   describe('响应拦截器 — 成功', () => {
-    it('code 为 0 时，应返回响应 data', () => {
+    it('code 为 0 时，应解包并返回信封中的 data', () => {
       const response = {
         config: { method: 'get', url: '/users/me' },
         data: { code: 0, message: 'ok', data: { id: 1, name: '张三' } },
       }
       const result = state.responseSuccessInterceptor(response)
-      expect(result).toEqual({ code: 0, message: 'ok', data: { id: 1, name: '张三' } })
+      expect(result).toEqual({ id: 1, name: '张三' })
     })
 
     it('code 非 0 时，应显示错误消息并 reject', async () => {
@@ -137,6 +138,19 @@ describe('P0-15 request.js — 前端 API 请求封装', () => {
       expect(ElMessage.warning).toHaveBeenCalledWith('登录已过期，请重新登录')
       vi.runAllTimers()
       expect(window.location.href).toBe('/login')
+    })
+
+    it('登录接口 401 时应提示后端错误信息，不应误报登录过期', async () => {
+      const error = {
+        config: { method: 'post', url: '/auth/login' },
+        response: { status: 401, data: { code: 401, message: '用户名或密码错误', data: null } },
+      }
+      const result = state.responseErrorInterceptor(error)
+      await expect(result).rejects.toThrow('用户名或密码错误')
+      expect(ElMessage.error).toHaveBeenCalledWith('用户名或密码错误')
+      expect(ElMessage.warning).not.toHaveBeenCalled()
+      vi.runAllTimers()
+      expect(window.location.href).toBe('')
     })
 
     it('非 401 HTTP 错误时，应显示错误消息并 reject', async () => {
