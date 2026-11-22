@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: backend_service/application_core
+title: 应用核心：FastAPI 应用装配与领域模型
+scope:
+    - backend/app/main.py
+    - backend/app/database.py
+    - backend/app/models.py
+    - backend/app/schemas.py
+    - backend/app/dependencies.py
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app

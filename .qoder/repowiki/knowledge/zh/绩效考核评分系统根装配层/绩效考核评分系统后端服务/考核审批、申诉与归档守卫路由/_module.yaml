@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: backend_service/approvals_and_appeals
+title: 考核审批、申诉与归档守卫路由
+scope:
+    - backend/app/routers/approvals.py
+    - backend/app/routers/appeals.py
+    - backend/app/routers/archive_guard.py
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app

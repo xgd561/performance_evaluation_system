@@ -1,0 +1,144 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: master
+nodes_managed: true
+exported_at: "2026-11-22T06:47:05Z"
+modules:
+    "":
+        dir_name: 绩效考核评分系统根装配层
+        title: 绩效考核评分系统根装配层
+        scope:
+            - main.py
+            - bak.md
+            - .gitignore
+            - restart-services.bat
+            - tmp_gen.py
+            - logs/
+        source_files: []
+        children:
+            - backend_service
+            - docs_and_prd
+            - frontend_app
+            - scripts_and_tools
+            - test_suite
+        depends_on: []
+        related_to: []
+    backend_service:
+        dir_name: 绩效考核评分系统后端服务
+        title: 绩效考核评分系统后端服务
+        scope:
+            - backend/
+        source_files: []
+        children:
+            - backend_service/application_core
+            - backend_service/approvals_and_appeals
+            - backend_service/performance_cycles
+            - backend_service/reporting_dashboard
+            - backend_service/system_services
+        depends_on: []
+        related_to: []
+    backend_service/application_core:
+        dir_name: 应用核心：FastAPI 应用装配与领域模型
+        title: 应用核心：FastAPI 应用装配与领域模型
+        scope:
+            - backend/app/main.py
+            - backend/app/database.py
+            - backend/app/models.py
+            - backend/app/schemas.py
+            - backend/app/dependencies.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app
+    backend_service/approvals_and_appeals:
+        dir_name: 考核审批、申诉与归档守卫路由
+        title: 考核审批、申诉与归档守卫路由
+        scope:
+            - backend/app/routers/approvals.py
+            - backend/app/routers/appeals.py
+            - backend/app/routers/archive_guard.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app
+    backend_service/performance_cycles:
+        dir_name: 绩效考核周期与评分路由层
+        title: 绩效考核周期与评分路由层
+        scope:
+            - backend/app/routers/cycles.py
+            - backend/app/routers/score_drafts.py
+            - backend/app/routers/kpi_templates.py
+            - backend/app/routers/scores.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app
+    backend_service/reporting_dashboard:
+        dir_name: 报表与仪表盘聚合接口
+        title: 报表与仪表盘聚合接口
+        scope:
+            - backend/app/routers/dashboard.py
+            - backend/app/routers/reports.py
+            - backend/app/routers/logs.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app
+    backend_service/system_services:
+        dir_name: 系统配置、通知与健康检查路由
+        title: 系统配置、通知与健康检查路由
+        scope:
+            - backend/app/routers/config.py
+            - backend/app/routers/notifications.py
+            - backend/app/routers/health.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: frontend_app
+    docs_and_prd:
+        dir_name: 绩效考核评分系统项目文档与 PRD
+        title: 绩效考核评分系统项目文档与 PRD
+        scope:
+            - docs/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    frontend_app:
+        dir_name: 绩效考核系统前端 SPA
+        title: 绩效考核系统前端 SPA
+        scope:
+            - frontend/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend_service/application_core
+            - path: backend_service/approvals_and_appeals
+            - path: backend_service/performance_cycles
+            - path: backend_service/reporting_dashboard
+            - path: backend_service/system_services
+    scripts_and_tools:
+        dir_name: 项目运维与初始化脚本集
+        title: 项目运维与初始化脚本集
+        scope:
+            - scripts/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    test_suite:
+        dir_name: 绩效考核评分系统测试套件
+        title: 绩效考核评分系统测试套件
+        scope:
+            - tests/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

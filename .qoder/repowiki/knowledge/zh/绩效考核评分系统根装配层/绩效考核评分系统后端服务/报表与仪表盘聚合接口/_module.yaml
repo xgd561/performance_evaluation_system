@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: backend_service/reporting_dashboard
+title: 报表与仪表盘聚合接口
+scope:
+    - backend/app/routers/dashboard.py
+    - backend/app/routers/reports.py
+    - backend/app/routers/logs.py
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app

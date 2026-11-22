@@ -1,0 +1,12 @@
+schema_version: 1
+module_path: backend_service/performance_cycles
+title: 绩效考核周期与评分路由层
+scope:
+    - backend/app/routers/cycles.py
+    - backend/app/routers/score_drafts.py
+    - backend/app/routers/kpi_templates.py
+    - backend/app/routers/scores.py
+source_files: []
+depends_on: []
+related_to:
+    - path: frontend_app
