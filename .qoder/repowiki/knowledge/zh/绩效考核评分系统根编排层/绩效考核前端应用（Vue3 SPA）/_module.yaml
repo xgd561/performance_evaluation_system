@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: frontend_app
-title: 绩效考核前端 SPA（Vue3 + Vite）
+title: 绩效考核前端应用（Vue3 SPA）
 scope:
     - frontend/
 source_files: []

@@ -178,7 +178,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="进度" width="180">
+        <el-table-column v-if="canViewCycleProgress" label="进度" width="180">
           <template #default="{ row }">
             <el-progress
               v-if="row.status !== 'not_started' && row.status !== 'archived'"
@@ -248,6 +248,7 @@ const authStore = useAuthStore()
 const loading = ref(false)
 
 const userRole = computed(() => authStore.user?.role || '')
+const canViewCycleProgress = computed(() => ['admin', 'hr', 'manager', 'executive'].includes(userRole.value))
 const userName = computed(() => authStore.user?.name || '')
 
 // 6阶段定义
@@ -531,14 +532,16 @@ onMounted(async () => {
       }
     }
 
-    // 加载各周期进度
-    for (const cycle of recentCycles.value) {
-      if (cycle.status !== 'not_started' && cycle.status !== 'archived') {
-        try {
-          const progress = await getCycleProgress(cycle.id)
-          cycleProgress.value[cycle.id] = progress
-        } catch (e) {
-          console.warn('Progress fetch error:', e)
+    // 加载各周期进度（仅管理视角角色有权限查询全员周期进度）
+    if (canViewCycleProgress.value) {
+      for (const cycle of recentCycles.value) {
+        if (cycle.status !== 'not_started' && cycle.status !== 'archived') {
+          try {
+            const progress = await getCycleProgress(cycle.id)
+            cycleProgress.value[cycle.id] = progress
+          } catch (e) {
+            console.warn('Progress fetch error:', e)
+          }
         }
       }
     }

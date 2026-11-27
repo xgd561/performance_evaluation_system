@@ -22,7 +22,7 @@ from app.schemas import (
     RefreshTokenRequest,
 )
 from app.models import User
-
+from app.core.exceptions import AuthError, NotFoundError, ValidationError as BizValidationError
 from app.services.operation_logger import log_operation
 
 router = APIRouter()
@@ -67,10 +67,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == req.username).first()
     if not user or not verify_password(req.password, user.password_hash):
         _record_failed_attempt(req.username)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户名或密码错误",
-        )
+        raise AuthError(message="用户名或密码错误")
 
     _clear_failed_attempts(req.username)
 
@@ -97,16 +94,10 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 def refresh_token(req: RefreshTokenRequest):
     payload = decode_token(req.refresh_token)
     if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token已过期或无效",
-        )
+        raise AuthError(message="Refresh token已过期或无效")
     username = payload.get("sub")
     if not username:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token无效",
-        )
+        raise AuthError(message="Token无效")
     access_token = create_access_token(data={"sub": username})
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -129,26 +120,14 @@ def change_password(
     db: Session = Depends(get_db),
 ):
     if not verify_password(req.old_password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="旧密码错误",
-        )
+        raise BizValidationError(message="旧密码错误", status_code=400)
     if req.old_password == req.new_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="新密码不能与旧密码相同",
-        )
+        raise BizValidationError(message="新密码不能与旧密码相同", status_code=400)
     if len(req.new_password) < 8:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="密码长度过短，请使用更复杂的密码",
-        )
+        raise BizValidationError(message="密码长度过短，请使用更复杂的密码")
     # Weak password check: pure digits or pure letters
     if req.new_password.isdigit() or req.new_password.isalpha():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="密码复杂度不足，请使用字母+数字组合",
-        )
+        raise BizValidationError(message="密码复杂度不足，请使用字母+数字组合")
     user.password_hash = get_password_hash(req.new_password)
     user.is_first_login = False
     db.commit()

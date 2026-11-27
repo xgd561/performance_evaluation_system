@@ -3,7 +3,7 @@ schema_version: 1
 locale: zh-CN
 branch: master
 nodes_managed: true
-exported_at: "2026-11-22T11:47:06Z"
+exported_at: "2026-11-27T11:51:13Z"
 modules:
     "":
         dir_name: 绩效考核评分系统根编排层
@@ -25,8 +25,8 @@ modules:
         depends_on: []
         related_to: []
     backend_service:
-        dir_name: 绩效考核后端服务（FastAPI 单体应用）
-        title: 绩效考核后端服务（FastAPI 单体应用）
+        dir_name: 绩效考核后端服务（FastAPI 多域聚合）
+        title: 绩效考核后端服务（FastAPI 多域聚合）
         scope:
             - backend/
         source_files: []
@@ -39,8 +39,8 @@ modules:
         depends_on: []
         related_to: []
     backend_service/application_core:
-        dir_name: FastAPI 应用装配与领域数据层
-        title: FastAPI 应用装配与领域数据层
+        dir_name: 应用核心装配与领域模型层
+        title: 应用核心装配与领域模型层
         scope:
             - backend/app/main.py
             - backend/app/database.py
@@ -111,8 +111,8 @@ modules:
         depends_on: []
         related_to: []
     frontend_app:
-        dir_name: 绩效考核前端 SPA（Vue3 + Vite）
-        title: 绩效考核前端 SPA（Vue3 + Vite）
+        dir_name: 绩效考核前端应用（Vue3 SPA）
+        title: 绩效考核前端应用（Vue3 SPA）
         scope:
             - frontend/
         source_files: []

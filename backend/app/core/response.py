@@ -13,7 +13,7 @@ class BaseResponse(BaseModel, Generic[T]):
     code: int = Field(..., description="业务状态码")
     message: str = Field(..., description="提示信息")
     data: Optional[T] = Field(None, description="业务数据")
-    timestamp: datetime = Field(default_factory=datetime.now, description="响应时间戳")
+    timestamp: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"), description="响应时间戳")
 
     model_config = ConfigDict(
         json_encoders={
@@ -57,25 +57,26 @@ def is_envelope(payload: Any) -> bool:
 
 def success_response(data: Any = None, message: str = "操作成功") -> dict:
     """
-    构造成功响应字典
+    构造成功响应字典，结构与 BaseResponse 对齐（含 timestamp）。
 
     Args:
         data: 业务数据，任意类型
         message: 提示信息
 
     Returns:
-        dict: {code, message, data}
+        dict: {code, message, data, timestamp}
     """
     return {
         "code": 0,
         "message": message,
         "data": data,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
 def error_response(code: int = 1000, message: str = "业务错误", data: Any = None) -> dict:
     """
-    构造错误响应字典
+    构造错误响应字典。
 
     Args:
         code: 业务错误码
@@ -83,12 +84,13 @@ def error_response(code: int = 1000, message: str = "业务错误", data: Any = 
         data: 附加数据（如校验失败的字段详情）
 
     Returns:
-        dict: {code, message, data}
+        dict: {code, message, data, timestamp}
     """
     return {
         "code": code,
         "message": message,
         "data": data,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
@@ -100,7 +102,7 @@ def paginate_response(
     message: str = "查询成功",
 ) -> dict:
     """
-    构造分页成功响应字典
+    构造分页成功响应字典。
 
     Args:
         data_list: 当前页数据列表
@@ -110,7 +112,7 @@ def paginate_response(
         message: 提示信息
 
     Returns:
-        dict: {code, message, data: {list, total, page, page_size}}
+        dict: {code, message, data: {list, total, page, page_size}, timestamp}
     """
     return {
         "code": 0,
@@ -121,11 +123,12 @@ def paginate_response(
             "page": page,
             "page_size": page_size,
         },
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
 class UnifiedResponseMiddleware:
-    """把成功的 JSON 响应统一包装为 {code, message, data}。
+    """把成功的 JSON 响应统一包装为 {code, message, data, timestamp}。
 
     策略（与前端 request.js 的解包约定对应）：
     - 只处理 2xx 且 Content-Type 为 JSON 的响应；PDF/Excel 等二进制流原样透传

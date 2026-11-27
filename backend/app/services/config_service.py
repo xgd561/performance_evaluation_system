@@ -1,9 +1,26 @@
 import json
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.models import SystemConfig
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 进程内配置缓存（单 Worker 约束）
+# ---------------------------------------------------------------------------
+# 当前实现使用模块级 dict 作为进程内缓存，适用于单 Worker（单进程）部署。
+# 多 Worker 场景下每个进程各持一份缓存，写入后仅 invalidate 本进程缓存，
+# 其他进程在下次 TTL 过期前会读到旧值。
+#
+# 若需多 Worker 部署，须将缓存迁移到集中式存储（如 Redis），
+# 或改用每次请求直接读库（去掉 _CACHE）。
+#
+# ⚠️  WARNING: This in-process cache is NOT safe for multi-worker deployments.
+#              Migrate to a shared cache (e.g. Redis) before scaling workers.
+# ---------------------------------------------------------------------------
 
 # In-memory cache: config_key -> parsed Python dict
 _CACHE: dict[str, Any] = {}

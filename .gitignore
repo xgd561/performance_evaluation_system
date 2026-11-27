@@ -44,6 +44,12 @@ htmlcov/
 # Claude
 .claude/
 
+# 环境变量（含敏感密钥，禁止提交）
+.env
+.env.local
+backend/.env
+backend/.env.local
+
 # Temporary files
 *.tmp
 *.temp

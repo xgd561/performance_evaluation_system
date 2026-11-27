@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: backend_service/application_core
-title: FastAPI 应用装配与领域数据层
+title: 应用核心装配与领域模型层
 scope:
     - backend/app/main.py
     - backend/app/database.py

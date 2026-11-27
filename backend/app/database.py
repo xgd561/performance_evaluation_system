@@ -2,13 +2,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from app.models import Base
 
-import os
+from app.core.config import settings
 
-# 数据库文件统一放在项目根级 data/db/ 目录下，便于备份和运维
-DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "db")
-os.makedirs(DB_DIR, exist_ok=True)
-_db_path = os.path.join(DB_DIR, "performance_evaluation.db").replace("\\", "/")
-SQLALCHEMY_DATABASE_URL = f"sqlite:///{_db_path}"
+# 数据库 URL 从环境变量/配置中心读取，不再硬编码。
+# 默认路径由 settings.DATABASE_URL 属性自动推导（<项目根>/data/db/performance_evaluation.db）。
+SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,

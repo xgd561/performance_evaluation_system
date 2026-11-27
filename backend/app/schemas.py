@@ -362,10 +362,9 @@ class AssessmentCycleCreate(BaseModel):
 
     @model_validator(mode='after')
     def check_dates_in_future(self):
-        """时间必须大于等于当前日期（今天及之后）"""
+        """结束与截止时间必须大于等于当前日期（今天及之后），起始时间不限"""
         today = date.today()
         for field_name, value in [
-            ("start_date", self.start_date),
             ("end_date", self.end_date),
             ("self_due_date", self.self_due_date),
             ("manager_due_date", self.manager_due_date),

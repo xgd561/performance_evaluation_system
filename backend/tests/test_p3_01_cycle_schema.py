@@ -128,9 +128,9 @@ class TestAssessmentCycleSchemaValidators:
         assert resp.status_code == 422
         assert "考核对象（部门列表）不能为空" in resp.json()["message"]
 
-    # ---------- 时间必须大于当前时间 ----------
+    # ---------- 时间校验（起始时间不限，结束/截止时间须 >= 今天） ----------
     def test_create_cycle_start_date_in_past(self, client: TestClient, admin_token):
-        """start_date 早于今天应返回 422"""
+        """start_date 早于今天应允许创建（起始时间不限制）"""
         payload = {
             "name": "开始日期过去",
             "type": "monthly",
@@ -140,8 +140,7 @@ class TestAssessmentCycleSchemaValidators:
             "grade_rules": {"A": 90, "B": 80, "C": 60, "D": 0}
         }
         resp = client.post("/assessment-cycles", json=payload, headers={"Authorization": f"Bearer {admin_token}"})
-        assert resp.status_code == 422
-        assert "start_date 不能早于今天" in resp.json()["message"]
+        assert resp.status_code == 201
 
     def test_create_cycle_end_date_in_past(self, client: TestClient, admin_token):
         """end_date 早于今天应返回 422"""
